@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON-LD product data: several JSON objects in one script tag, `ProductGroup` variants (each with its price, plus the overall range), `AggregateOffer` and `priceSpecification` prices.
 
 ### Fixed
+- AliExpress's slider CAPTCHA ("CAPTCHA Verification", "drag the slider to verify", the `_____tmd_____/punish` redirect) counts as a challenge page instead of a thin one, so stealth and then Firecrawl (behind the spending guard) get their turn. Challenge markers are now also matched in the visible text, not only in the first 6 KB of HTML.
+- A shell or partial `http` page no longer makes the chain skip Firecrawl as "a free tier returned the page". When nothing better comes back, or the spend is declined, the result is `status: failed` with an "Incomplete page" error, `metadata.incomplete`, and the partial text still attached; it is never cached.
 - The `http` tier could return Scrapling's `markdown` method object as the page text when extraction found nothing (seen on Amazon's intermittent stub page).
 - SQLite page cache (`FETCH_CACHE_PATH`, `FETCH_CACHE_TTL`, default one day); `crawl(fresh=true)` bypasses it.
 

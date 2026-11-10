@@ -216,6 +216,10 @@ def _format_single_doc_markdown(doc: CrawledDocument) -> str:
 
     if doc.status == "failed":
         lines.append(f"**Error:** {doc.error_message}")
+        if meta.get("incomplete") and doc.markdown:
+            lines.extend(
+                ["", "**Partial text:**", "", demote_headings(doc.markdown, 1)]
+            )
     else:
         lines.append(demote_headings(doc.markdown, 1))
 

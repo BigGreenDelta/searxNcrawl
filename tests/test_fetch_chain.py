@@ -84,8 +84,65 @@ async def test_script_shell_falls_back_to_http_text_without_stealth_or_paid(tier
     script["browser"] = RuntimeError("browser crashed")
     script["stealth"] = RuntimeError("stealth crashed")
     doc = await fetch_chain.fetch("https://a.test")
-    assert doc.status == "success" and doc.metadata["fetched_via"] == "http"
-    assert "firecrawl" not in calls
+    # a shell is not "a free tier returned the page": the paid tier is tried
+    # (here it has no key), and the result is a failure carrying the text
+    assert any(
+        a.startswith("firecrawl:") and "skipped" not in a
+        for a in doc.metadata["tiers_tried"]
+    )
+    assert doc.status == "failed" and doc.metadata["incomplete"] is True
+    assert doc.markdown == LONG and doc.metadata["fetched_via"] == "http"
+
+
+async def test_aliexpress_slider_captcha_counts_as_blocked(tiers):
+    calls, script = tiers
+    captcha = (
+        "<html><head><title>CAPTCHA Verification</title></head><body>"
+        + "<script>x</script>" * 20000
+        + "</body></html>"
+    )
+    script["http"] = (_doc("https://a.test", LONG, "http"), SHELL_HTML)
+    script["browser"] = (
+        _doc("https://a.test", "Please drag the slider to verify", "browser"),
+        captcha,
+    )
+    script["stealth"] = (_doc("https://a.test", LONG + " listings", "stealth"), "")
+    doc = await fetch_chain.fetch("https://a.test")
+    assert "browser: challenge page" in doc.metadata["tiers_tried"]
+    assert doc.metadata["fetched_via"] == "stealth"
+
+
+async def test_declined_spend_after_shell_returns_incomplete_with_reason(
+    tiers, monkeypatch
+):
+    calls, script = tiers
+    script["http"] = (_doc("https://a.test", LONG, "http"), SHELL_HTML)
+    script["browser"] = (_doc("https://a.test", "too early", "browser"), "")
+    script["stealth"] = (_doc("https://a.test", "too early", "stealth"), "")
+
+    async def blocked(url, approve, timeout=60):
+        return CrawledDocument(
+            url,
+            url,
+            "failed",
+            "",
+            error_message="Blocked: Firecrawl would spend credits and the user did not approve",
+            metadata={
+                "fetched_via": "firecrawl",
+                "blocked": True,
+                "approval_reason": "1460 used.",
+            },
+        )
+
+    monkeypatch.setattr(firecrawl_tier, "scrape", blocked)
+    doc = await fetch_chain.fetch("https://a.test")
+    assert doc.status == "failed" and doc.metadata["incomplete"] is True
+    assert (
+        doc.metadata["approval_reason"] == "1460 used."
+        and doc.metadata["blocked"] is True
+    )
+    assert "Firecrawl was not approved" in doc.error_message
+    assert doc.markdown == LONG
 
 
 async def test_shell_then_thin_browser_tries_stealth(tiers):
@@ -105,8 +162,8 @@ async def test_incomplete_fallback_is_flagged_and_not_cached(tiers, monkeypatch)
     script["browser"] = (_doc("https://a.test/inc", "too early", "browser"), "")
     script["stealth"] = RuntimeError("stealth crashed")
     doc = await fetch_chain.fetch("https://a.test/inc")
-    assert doc.status == "success" and doc.metadata["incomplete"] is True
-    assert "incomplete page: script shell" in doc.metadata["warning"]
+    assert doc.status == "failed" and doc.metadata["incomplete"] is True
+    assert doc.error_message.startswith("Incomplete page: script shell")
     await fetch_chain.fetch("https://a.test/inc")
     assert calls.count("http") == 2  # not served from cache
 

@@ -62,6 +62,11 @@ _CHALLENGE_MARKERS = (
     "access denied",
     "request unsuccessful. incapsula",
     "pardon our interruption",
+    # AliExpress / Alibaba slider CAPTCHA, served after a burst of searches.
+    "captcha verification",
+    "drag the slider to verify",
+    "slide to verify",
+    "_____tmd_____/punish",
     # Login walls: the page exists but is not readable without an account.
     "log in to use old reddit",
     "log in to continue",
@@ -105,9 +110,11 @@ def free_tiers() -> List[str]:
 
 def looks_blocked(text: str, html: str = "") -> bool:
     """True for challenge / bot-wall pages."""
-    sample = (html or text)[:_CHALLENGE_SCAN_LIMIT].lower()
     if len(text) > _CHALLENGE_SCAN_LIMIT:
         return False
+    # The head of the HTML holds the <title>; the text holds what a visitor
+    # sees. A challenge page can bury its message far into a big HTML file.
+    sample = f"{html[:_CHALLENGE_SCAN_LIMIT]}\n{text}".lower()
     return any(marker in sample for marker in _CHALLENGE_MARKERS)
 
 
@@ -387,6 +394,38 @@ def _add_product_facts(doc: CrawledDocument, html: str) -> None:
         doc.metadata["product_facts"] = True
 
 
+def _incomplete(
+    doc: CrawledDocument,
+    reason: str,
+    attempts: list[str],
+    url: str,
+    *,
+    extra: Optional[dict] = None,
+    note: str = "no other tier rendered more",
+) -> CrawledDocument:
+    """The partial http text, reported as a failure that still carries it.
+
+    Status is "failed" so a caller cannot mistake it for the page; the text
+    stays in ``markdown`` for whatever it is worth. Never cached, so the next
+    request tries every tier again.
+    """
+    message = (
+        f"Incomplete page: {reason}; {note}. Products, prices or listings are "
+        "probably missing; the partial text is attached."
+    )
+    doc.request_url = url
+    doc.status = "failed"
+    doc.error_message = message
+    doc.metadata = {
+        **doc.metadata,
+        **(extra or {}),
+        "incomplete": True,
+        "tiers_tried": attempts,
+    }
+    doc.metadata.pop("warning", None)
+    return doc
+
+
 _RUNNERS = {"http": _tier_http, "browser": _tier_browser, "stealth": _tier_stealth}
 
 
@@ -427,7 +466,9 @@ async def fetch(
         if tier == "stealth" and best is not None and not blocked_seen and not partial:
             attempts.append("stealth: skipped, page is short but not blocked")
             continue
-        if tier == "firecrawl" and best is not None:
+        # The http text already judged partial is not "a free tier returned the
+        # page": Firecrawl stays in play (behind the usual spending guard).
+        if tier == "firecrawl" and best is not None and best is not partial_doc:
             attempts.append("firecrawl: skipped, a free tier returned the page")
             continue
         start = time.monotonic()
@@ -474,6 +515,21 @@ async def fetch(
             doc.status = "failed"
             doc.markdown = ""
             return doc
+        if doc.metadata.get("blocked") and partial_doc is not None:
+            # Paid tier declined (or not yet approved): hand back the partial
+            # text, marked incomplete, with what the spend question needs.
+            return _incomplete(
+                partial_doc,
+                partial or "partial page",
+                attempts,
+                url,
+                extra={
+                    k: doc.metadata[k]
+                    for k in ("blocked", "approval_reason", "credits_used_this_period")
+                    if k in doc.metadata
+                },
+                note="Firecrawl was not approved",
+            )
         if doc.metadata.get("blocked"):
             return CrawledDocument(
                 request_url=url,
@@ -493,14 +549,7 @@ async def fetch(
         best.metadata["tiers_tried"] = attempts
         best.request_url = url
         if best is partial_doc:
-            # Only the http text the chain already judged incomplete: say so,
-            # and do not cache it, so the next request tries the browser again.
-            best.metadata["warning"] = (
-                f"incomplete page: {partial}; no browser tier rendered more, so "
-                "products, prices or listings may be missing"
-            )
-            best.metadata["incomplete"] = True
-            return best
+            return _incomplete(best, partial or "partial page", attempts, url)
         # Nothing passed the length check, but a short page beats no page.
         best.metadata["warning"] = "short page: no tier returned more than this"
         cache.put(best)

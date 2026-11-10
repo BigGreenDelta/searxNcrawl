@@ -13,13 +13,18 @@ A tier's result is accepted when it is not a challenge page and has at least
 
 An http result that is a script shell (a big HTML document whose readable text
 is a tiny fraction of it, like a store search page that loads its listings with
-JavaScript) is kept only as a fallback, and the browser tier gets a go.
+JavaScript), or whose extracted text is a small share of the text the page
+shows (a category page reduced to its intro paragraph), is kept only as a
+fallback: the browser tier gets a go, and stealth too if the browser comes
+back thin. If nothing beats it, it is returned with a warning.
 
 Environment:
     FETCH_MIN_CHARS: shortest Markdown accepted as a real page (default 400)
     FETCH_TIERS: comma-separated tiers to use, in order (default all four)
     FETCH_SHELL_RATIO: text/HTML ratio under which a big http page counts as a
         script shell (default 0.01; 0 turns the check off)
+    FETCH_MIN_COVERAGE: extracted/visible text share under which an http page
+        counts as partial (default 0.25; 0 turns the check off)
 """
 
 from __future__ import annotations
@@ -143,6 +148,57 @@ def script_shell(doc: CrawledDocument, html: str) -> Optional[str]:
     if text >= _SHELL_MAX_TEXT or text / len(html) >= ratio:
         return None
     return f"script shell ({text} chars of text in {len(html) // 1024} KB of HTML)"
+
+
+DEFAULT_MIN_COVERAGE = 0.25
+# Pages with less visible text than this are too small to judge coverage on.
+_COVERAGE_MIN_VISIBLE = 2000
+
+
+def min_coverage() -> float:
+    raw = os.getenv("FETCH_MIN_COVERAGE", "").strip()
+    try:
+        return max(0.0, float(raw)) if raw else DEFAULT_MIN_COVERAGE
+    except ValueError:
+        return DEFAULT_MIN_COVERAGE
+
+
+def _visible_chars(html: str) -> int:
+    import lxml.html
+
+    try:
+        tree = lxml.html.fromstring(html)
+    except Exception:
+        return 0
+    for node in tree.xpath("//script|//style|//noscript|//template|//svg"):
+        node.drop_tree()
+    return len(" ".join(tree.text_content().split()))
+
+
+def partial_extraction(doc: CrawledDocument, html: str) -> Optional[str]:
+    """Why the extracted text looks like a fraction of what the page shows.
+
+    Text extraction keeps what it takes for the main article. On store
+    category pages, contact pages and news front pages that is an intro
+    paragraph or a cookie banner, while the product grid, prices or link
+    lists are dropped. Articles come out at 0.9 or more of the visible text,
+    Amazon product pages at 0.5; the broken pages were at 0.03-0.10.
+    """
+    floor = min_coverage()
+    if floor <= 0 or not html or doc.metadata.get("product_listing"):
+        return None
+    visible = _visible_chars(html)
+    if visible < _COVERAGE_MIN_VISIBLE:
+        return None
+    text = len((doc.markdown or "").strip())
+    if text / visible >= floor:
+        return None
+    return f"partial text ({text} of {visible} visible chars)"
+
+
+def needs_browser(doc: CrawledDocument, html: str) -> Optional[str]:
+    """Why an accepted http page should still be rendered, or None."""
+    return script_shell(doc, html) or partial_extraction(doc, html)
 
 
 def _html_to_markdown(html: str, url: str) -> str:
@@ -325,6 +381,7 @@ def _add_product_facts(doc: CrawledDocument, html: str) -> None:
         # A store search page: the clean list replaces the tracking-link text.
         doc.markdown = results
         doc.metadata["product_facts"] = True
+        doc.metadata["product_listing"] = True
     elif facts:
         doc.markdown = f"{facts}\n{doc.markdown or ''}"
         doc.metadata["product_facts"] = True
@@ -358,10 +415,16 @@ async def fetch(
         attempts.append("free tiers: PDF, download it and convert locally")
 
     blocked_seen = False
+    # Why the http text looked partial (script shell, low coverage), if it did.
+    partial: Optional[str] = None
+    partial_doc: Optional[CrawledDocument] = None
     for tier in order:
         # A short but real page (no challenge, no error) is not worth a stealth
         # browser or paid credits: those tiers exist for bot walls and failures.
-        if tier == "stealth" and best is not None and not blocked_seen:
+        # A partial http page is different: if the browser came back thin too
+        # (it can render before the listings arrive), stealth waits for the
+        # network to go idle and gets one more try.
+        if tier == "stealth" and best is not None and not blocked_seen and not partial:
             attempts.append("stealth: skipped, page is short but not blocked")
             continue
         if tier == "firecrawl" and best is not None:
@@ -385,12 +448,15 @@ async def fetch(
             _add_product_facts(doc, html)
         problem = _verdict(doc, html)
         elapsed = time.monotonic() - start
-        shell = script_shell(doc, html) if problem is None and tier == "http" else None
-        if shell is not None and any(t in order for t in ("browser", "stealth")):
+        reason = (
+            needs_browser(doc, html) if problem is None and tier == "http" else None
+        )
+        if reason is not None and any(t in order for t in ("browser", "stealth")):
             # Readable but probably not the real content: let a browser render
             # it, and fall back to this text if the browser does no better.
-            LOGGER.info("Tier http got %s for %s, trying a browser", shell, url)
-            attempts.append(f"http: {shell}")
+            LOGGER.info("Tier http got %s for %s, trying a browser", reason, url)
+            attempts.append(f"http: {reason}")
+            partial, partial_doc = reason, doc
             if best is None or len(doc.markdown) > len(best.markdown):
                 best = doc
             continue
@@ -424,10 +490,19 @@ async def fetch(
             best = doc
 
     if best is not None:
-        # Nothing passed the length check, but a short page beats no page.
         best.metadata["tiers_tried"] = attempts
-        best.metadata["warning"] = "short page: no tier returned more than this"
         best.request_url = url
+        if best is partial_doc:
+            # Only the http text the chain already judged incomplete: say so,
+            # and do not cache it, so the next request tries the browser again.
+            best.metadata["warning"] = (
+                f"incomplete page: {partial}; no browser tier rendered more, so "
+                "products, prices or listings may be missing"
+            )
+            best.metadata["incomplete"] = True
+            return best
+        # Nothing passed the length check, but a short page beats no page.
+        best.metadata["warning"] = "short page: no tier returned more than this"
         cache.put(best)
         return best
 

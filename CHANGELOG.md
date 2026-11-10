@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An `http` result that looks like a JavaScript shell (100 KB+ of HTML whose text is under `FETCH_SHELL_RATIO` of it, default 1%) no longer ends the chain: the browser tier renders the page, and the `http` text is only the fallback. AliExpress search pages went from 2 KB of banner text to the full listings.
 - Product pages get a "Product facts" block above the text (title, rating and rating count, price, availability) read from the markup: Amazon's product widgets, otherwise schema.org `Product` JSON-LD. Text extraction used to drop the rating or pick up a carousel product's stars instead. Pages with 4,000+ characters of text never count as script shells (Amazon's 2.5 MB of HTML had tripped the check). Amazon search pages are replaced by one line per result: title, price, stars and rating count, recent sales, sponsored flag and a plain `/dp/` link.
 
+- An `http` page whose extracted text is under `FETCH_MIN_COVERAGE` (default 25%) of the text the page shows also goes on to the browser: extraction had reduced store category pages to an intro paragraph and a contact page to its cookie banner. When the `http` text was a shell or partial and the browser comes back thin, stealth gets a try. If only that `http` text is left, it is returned with an "incomplete page" warning and is not cached.
+- JSON-LD product data: several JSON objects in one script tag, `ProductGroup` variants (each with its price, plus the overall range), `AggregateOffer` and `priceSpecification` prices.
+
 ### Fixed
 - The `http` tier could return Scrapling's `markdown` method object as the page text when extraction found nothing (seen on Amazon's intermittent stub page).
 - SQLite page cache (`FETCH_CACHE_PATH`, `FETCH_CACHE_TTL`, default one day); `crawl(fresh=true)` bypasses it.

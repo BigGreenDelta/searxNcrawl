@@ -177,6 +177,49 @@ def test_scrapling_markdown_method_never_becomes_page_text():
     assert isinstance(doc.markdown, str)
 
 
+def test_json_ld_several_objects_in_one_tag():
+    one = {"@type": "Organization", "name": "Shop"}
+    two = {
+        "@type": "Product",
+        "name": "Solder wire",
+        "offers": {"@type": "Offer", "price": "11.77", "priceCurrency": "GBP"},
+    }
+    html = (
+        '<html><script type="application/ld+json">'
+        f"{json.dumps(one)}\n{json.dumps(two)}</script></html>"
+    )
+    assert "**Price:** 11.77 GBP" in product_facts.extract(html, "https://shop.test/p")
+
+
+def test_json_ld_product_group_variants():
+    group = {
+        "@type": "ProductGroup",
+        "name": "Iron - Shop",
+        "hasVariant": [
+            {
+                "@type": "Product",
+                "name": "Iron HS-02A - 6 Tips",
+                "offers": {
+                    "price": "49",
+                    "priceCurrency": "GBP",
+                    "availability": "https://schema.org/OutOfStock",
+                },
+            },
+            {
+                "@type": "Product",
+                "name": "Iron HS-02A - Kit",
+                "offers": {"price": "45", "priceCurrency": "GBP"},
+            },
+        ],
+    }
+    html = (
+        f'<html><script type="application/ld+json">{json.dumps(group)}</script></html>'
+    )
+    facts = product_facts.extract(html, "https://shop.test/iron")
+    assert "**Variants:** 6 Tips: 49 GBP (OutOfStock); Kit: 45 GBP" in facts
+    assert "**Price:** 45-49 GBP" in facts
+
+
 def test_plain_page_has_no_facts():
     assert product_facts.extract("<html><p>Hello</p></html>", "https://a.test") is None
     assert product_facts.extract(AMAZON, "https://www.amazon.co.uk/s?k=mat") is None

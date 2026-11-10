@@ -88,6 +88,58 @@ async def test_script_shell_falls_back_to_http_text_without_stealth_or_paid(tier
     assert "firecrawl" not in calls
 
 
+async def test_shell_then_thin_browser_tries_stealth(tiers):
+    calls, script = tiers
+    script["http"] = (_doc("https://a.test", LONG, "http"), SHELL_HTML)
+    script["browser"] = (_doc("https://a.test", "too early", "browser"), "")
+    script["stealth"] = (_doc("https://a.test", LONG + " all listings", "stealth"), "")
+    doc = await fetch_chain.fetch("https://a.test")
+    assert calls == ["http", "browser", "stealth"]
+    assert doc.metadata["fetched_via"] == "stealth"
+
+
+async def test_incomplete_fallback_is_flagged_and_not_cached(tiers, monkeypatch):
+    calls, script = tiers
+    monkeypatch.setenv("FETCH_CACHE_TTL", "3600")
+    script["http"] = (_doc("https://a.test/inc", LONG, "http"), SHELL_HTML)
+    script["browser"] = (_doc("https://a.test/inc", "too early", "browser"), "")
+    script["stealth"] = RuntimeError("stealth crashed")
+    doc = await fetch_chain.fetch("https://a.test/inc")
+    assert doc.status == "success" and doc.metadata["incomplete"] is True
+    assert "incomplete page: script shell" in doc.metadata["warning"]
+    await fetch_chain.fetch("https://a.test/inc")
+    assert calls.count("http") == 2  # not served from cache
+
+
+PAGE_WITH_GRID = (
+    "<html><body><p>Intro paragraph.</p><ul>"
+    + "".join(
+        f"<li>Product {i} - multimeter model {i} £{i}.99</li>" for i in range(200)
+    )
+    + "</ul></body></html>"
+)
+
+
+async def test_low_coverage_http_text_goes_to_browser(tiers):
+    calls, script = tiers
+    script["http"] = (_doc("https://a.test", LONG, "http"), PAGE_WITH_GRID)
+    script["browser"] = (_doc("https://a.test", LONG * 6, "browser"), "")
+    doc = await fetch_chain.fetch("https://a.test")
+    assert calls == ["http", "browser"]
+    assert "partial text" in doc.metadata["tiers_tried"][0]
+
+
+async def test_full_coverage_http_text_stays(tiers):
+    calls, script = tiers
+    full = "word " * 200
+    script["http"] = (
+        _doc("https://a.test", full * 3, "http"),
+        f"<html><p>{full}</p></html>",
+    )
+    await fetch_chain.fetch("https://a.test")
+    assert calls == ["http"]
+
+
 async def test_big_page_with_real_text_is_not_a_shell(tiers):
     calls, script = tiers
     script["http"] = (_doc("https://a.test", "word " * 5000, "http"), SHELL_HTML)

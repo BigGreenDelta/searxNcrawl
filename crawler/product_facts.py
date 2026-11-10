@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any, Iterable, Optional
 from urllib.parse import urlparse
@@ -100,38 +101,107 @@ def _walk_ld(data: Any) -> Iterable[dict]:
                 yield from _walk_ld(data[key])
 
 
+def _ld_blobs(text: str) -> Iterable[Any]:
+    """Every JSON value in a script tag; some shops put several in one tag."""
+    decoder = json.JSONDecoder()
+    text = text.strip()
+    pos = 0
+    while pos < len(text):
+        try:
+            value, end = decoder.raw_decode(text, pos)
+        except ValueError:
+            return
+        yield value
+        pos = end
+        while pos < len(text) and text[pos] in " \t\r\n,;":
+            pos += 1
+
+
+def _offer(offers: Any) -> tuple[str, str]:
+    """(price, availability) from an Offer, AggregateOffer or a list of them."""
+    if isinstance(offers, list):
+        offers = offers[0] if offers else {}
+    if not isinstance(offers, dict):
+        return "", ""
+    price = offers.get("price")
+    if price is None:
+        low, high = offers.get("lowPrice"), offers.get("highPrice")
+        if low is not None:
+            price = f"{low}-{high}" if high not in (None, low) else low
+    if price is None:
+        spec = offers.get("priceSpecification")
+        if isinstance(spec, list):
+            spec = spec[0] if spec else {}
+        if isinstance(spec, dict):
+            price = spec.get("price")
+            offers = {
+                **offers,
+                "priceCurrency": offers.get("priceCurrency")
+                or spec.get("priceCurrency"),
+            }
+    text = (
+        f"{price} {offers.get('priceCurrency') or ''}".strip()
+        if price is not None
+        else ""
+    )
+    avail = offers.get("availability")
+    return text, str(avail).rsplit("/", 1)[-1] if avail else ""
+
+
+def _ld_facts(product: dict) -> dict[str, str]:
+    facts: dict[str, str] = {}
+    if product.get("name"):
+        facts["Title"] = _clean(str(product["name"]))
+    rating = product.get("aggregateRating") or {}
+    if isinstance(rating, dict) and rating.get("ratingValue") is not None:
+        best = rating.get("bestRating") or 5
+        text = f"{rating['ratingValue']} out of {best}"
+        n = rating.get("reviewCount") or rating.get("ratingCount")
+        if n is not None:
+            text += f" ({n} ratings)"
+        facts["Rating"] = text
+    price, avail = _offer(product.get("offers"))
+    if price:
+        facts["Price"] = price
+    if avail:
+        facts["Availability"] = avail
+    variants = product.get("hasVariant")
+    if isinstance(variants, dict):
+        variants = [variants]
+    if isinstance(variants, list) and variants:
+        # A ProductGroup: each variant carries its own price.
+        items = [v for v in variants if isinstance(v, dict)]
+        names = [_clean(str(v.get("name") or v.get("sku") or "variant")) for v in items]
+        # Variant names usually repeat the product name: keep only the part after it.
+        shared = os.path.commonprefix(names) if len(names) > 1 else ""
+        cut = shared.rfind(" - ") + 3 if " - " in shared else 0
+        rows, amounts, currency = [], [], ""
+        for v, name in list(zip(items, names))[:12]:
+            v_price, v_avail = _offer(v.get("offers"))
+            rows.append(
+                f"{name[cut:] or name}: {v_price or 'no price'}"
+                + (f" ({v_avail})" if v_avail else "")
+            )
+            num = re.match(r"([\d.]+)\s*([A-Z]{3})?$", v_price)
+            if num:
+                amounts.append(float(num.group(1)))
+                currency = num.group(2) or currency
+        if rows:
+            facts["Variants"] = "; ".join(rows) + (" ..." if len(items) > 12 else "")
+            if "Price" not in facts and amounts:
+                low, high = min(amounts), max(amounts)
+                span = f"{low:g}" if low == high else f"{low:g}-{high:g}"
+                facts["Price"] = f"{span} {currency}".strip()
+    return facts
+
+
 def _json_ld(tree) -> dict[str, str]:
     for script in tree.xpath('//script[@type="application/ld+json"]'):
-        try:
-            data = json.loads(script.text_content() or "")
-        except ValueError:
-            continue
-        for product in _walk_ld(data):
-            facts: dict[str, str] = {}
-            if product.get("name"):
-                facts["Title"] = _clean(str(product["name"]))
-            rating = product.get("aggregateRating") or {}
-            if isinstance(rating, dict) and rating.get("ratingValue") is not None:
-                best = rating.get("bestRating") or 5
-                text = f"{rating['ratingValue']} out of {best}"
-                n = rating.get("reviewCount") or rating.get("ratingCount")
-                if n is not None:
-                    text += f" ({n} ratings)"
-                facts["Rating"] = text
-            offers = product.get("offers") or {}
-            if isinstance(offers, list):
-                offers = offers[0] if offers else {}
-            if isinstance(offers, dict):
-                price = offers.get("price") or offers.get("lowPrice")
-                if price is not None:
-                    facts["Price"] = (
-                        f"{price} {offers.get('priceCurrency', '')}".strip()
-                    )
-                avail = offers.get("availability")
-                if avail:
-                    facts["Availability"] = str(avail).rsplit("/", 1)[-1]
-            if len(facts) > 1:
-                return facts
+        for data in _ld_blobs(script.text_content() or ""):
+            for product in _walk_ld(data):
+                facts = _ld_facts(product)
+                if len(facts) > 1:
+                    return facts
     return {}
 
 

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `reddit_posts` and `reddit_thread` MCP tools. Listings come live from Reddit RSS (hot/new/top/rising/controversial), with the Arctic Shift archive as fallback; keyword and author search and full comment trees (nested, best first, collapsed branches counted) come from Arctic Shift. Archive query timeouts are retried; titles the archive caught while a moderator bot hid the post are recovered from the thread RSS.
 - The `http` tier returns JSON (pretty-printed), XML, RSS/Atom and plain text as they are instead of escaped Markdown.
 - The `browser` tier treats an HTTP 4xx/5xx response as a failure instead of returning the rendered error page; login walls ("log in to continue", old Reddit's) count as blocked.
+- An `http` result that looks like a JavaScript shell (100 KB+ of HTML whose text is under `FETCH_SHELL_RATIO` of it, default 1%) no longer ends the chain: the browser tier renders the page, and the `http` text is only the fallback. AliExpress search pages went from 2 KB of banner text to the full listings.
 - SQLite page cache (`FETCH_CACHE_PATH`, `FETCH_CACHE_TTL`, default one day); `crawl(fresh=true)` bypasses it.
 
 ## [0.33.2] - 2026-11-05

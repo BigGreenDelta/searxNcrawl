@@ -65,6 +65,36 @@ async def test_thin_page_escalates_to_browser_but_not_stealth_or_paid(tiers):
     assert "short page" in doc.metadata["warning"]
 
 
+SHELL_HTML = "<html><script>" + "x" * 200_000 + "</script><h1>Search</h1></html>"
+
+
+async def test_script_shell_escalates_to_browser(tiers):
+    calls, script = tiers
+    script["http"] = (_doc("https://a.test", LONG, "http"), SHELL_HTML)
+    script["browser"] = (_doc("https://a.test", LONG + " listings", "browser"), "")
+    doc = await fetch_chain.fetch("https://a.test")
+    assert calls == ["http", "browser"]
+    assert doc.metadata["fetched_via"] == "browser"
+    assert "script shell" in doc.metadata["tiers_tried"][0]
+
+
+async def test_script_shell_falls_back_to_http_text_without_stealth_or_paid(tiers):
+    calls, script = tiers
+    script["http"] = (_doc("https://a.test", LONG, "http"), SHELL_HTML)
+    script["browser"] = RuntimeError("browser crashed")
+    script["stealth"] = RuntimeError("stealth crashed")
+    doc = await fetch_chain.fetch("https://a.test")
+    assert doc.status == "success" and doc.metadata["fetched_via"] == "http"
+    assert "firecrawl" not in calls
+
+
+async def test_big_page_with_real_text_is_not_a_shell(tiers):
+    calls, script = tiers
+    script["http"] = (_doc("https://a.test", "word " * 5000, "http"), SHELL_HTML)
+    await fetch_chain.fetch("https://a.test")
+    assert calls == ["http"]
+
+
 async def test_challenge_page_escalates_to_stealth(tiers):
     calls, script = tiers
     wall = "<title>Just a moment...</title> challenge-platform"

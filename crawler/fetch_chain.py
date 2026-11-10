@@ -11,9 +11,15 @@
 A tier's result is accepted when it is not a challenge page and has at least
 ``FETCH_MIN_CHARS`` characters of Markdown. Successful results are cached.
 
+An http result that is a script shell (a big HTML document whose readable text
+is a tiny fraction of it, like a store search page that loads its listings with
+JavaScript) is kept only as a fallback, and the browser tier gets a go.
+
 Environment:
     FETCH_MIN_CHARS: shortest Markdown accepted as a real page (default 400)
     FETCH_TIERS: comma-separated tiers to use, in order (default all four)
+    FETCH_SHELL_RATIO: text/HTML ratio under which a big http page counts as a
+        script shell (default 0.01; 0 turns the check off)
 """
 
 from __future__ import annotations
@@ -112,6 +118,30 @@ def _verdict(doc: CrawledDocument, html: str = "") -> Optional[str]:
     return None
 
 
+DEFAULT_SHELL_RATIO = 0.01
+# Below this much HTML a low ratio is just a small page with some boilerplate.
+_SHELL_MIN_HTML = 100_000
+
+
+def shell_ratio() -> float:
+    raw = os.getenv("FETCH_SHELL_RATIO", "").strip()
+    try:
+        return max(0.0, float(raw)) if raw else DEFAULT_SHELL_RATIO
+    except ValueError:
+        return DEFAULT_SHELL_RATIO
+
+
+def script_shell(doc: CrawledDocument, html: str) -> Optional[str]:
+    """Why an http page looks like a JavaScript shell, or None if it does not."""
+    ratio = shell_ratio()
+    if ratio <= 0 or len(html) < _SHELL_MIN_HTML:
+        return None
+    text = len((doc.markdown or "").strip())
+    if text / len(html) >= ratio:
+        return None
+    return f"script shell ({text} chars of text in {len(html) // 1024} KB of HTML)"
+
+
 def _html_to_markdown(html: str, url: str) -> str:
     import trafilatura
 
@@ -163,7 +193,11 @@ def _doc_from_scrapling(url: str, resp, tier: str) -> tuple[CrawledDocument, str
     final_url = str(getattr(resp, "url", None) or url)
     raw = _passthrough(resp)
     if raw is not None:
-        meta = {"fetched_via": tier, "status_code": status, "content_type": _content_type(resp)}
+        meta = {
+            "fetched_via": tier,
+            "status_code": status,
+            "content_type": _content_type(resp),
+        }
         failed = status is not None and status >= 400
         return (
             CrawledDocument(
@@ -310,7 +344,9 @@ async def fetch(
         start = time.monotonic()
         try:
             if tier == "firecrawl":
-                doc = await firecrawl_tier.scrape(url, approve, timeout=max(timeout, 60))
+                doc = await firecrawl_tier.scrape(
+                    url, approve, timeout=max(timeout, 60)
+                )
                 html = ""
             else:
                 tier_timeout = timeout * 3 if tier == "stealth" else timeout
@@ -321,6 +357,15 @@ async def fetch(
             continue
         problem = _verdict(doc, html)
         elapsed = time.monotonic() - start
+        shell = script_shell(doc, html) if problem is None and tier == "http" else None
+        if shell is not None and any(t in order for t in ("browser", "stealth")):
+            # Readable but probably not the real content: let a browser render
+            # it, and fall back to this text if the browser does no better.
+            LOGGER.info("Tier http got %s for %s, trying a browser", shell, url)
+            attempts.append(f"http: {shell}")
+            if best is None or len(doc.markdown) > len(best.markdown):
+                best = doc
+            continue
         if problem is None:
             LOGGER.info("Fetched %s via %s in %.1fs", url, tier, elapsed)
             doc.metadata["tiers_tried"] = attempts + [f"{tier}: ok"]
@@ -384,6 +429,8 @@ async def fetch_many(
 
     async def one(u: str) -> CrawledDocument:
         async with semaphore:
-            return await fetch(u, approve=approve, tiers=tier_list, timeout=timeout, fresh=fresh)
+            return await fetch(
+                u, approve=approve, tiers=tier_list, timeout=timeout, fresh=fresh
+            )
 
     return list(await asyncio.gather(*(one(u) for u in urls)))

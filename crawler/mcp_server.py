@@ -40,9 +40,10 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, List, Optional
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
+from fastmcp.server.elicitation import AcceptedElicitation
 
-from . import search_orchestrator
+from . import fetch_chain, search_orchestrator
 from .document import CrawledDocument
 from .env import load_config
 from .markdown_dedup import demote_headings
@@ -171,11 +172,17 @@ def _doc_to_dict(doc: CrawledDocument) -> dict:
 
 def _format_single_doc_markdown(doc: CrawledDocument) -> str:
     """Format a single document as markdown with header."""
+    meta = doc.metadata or {}
+    via = meta.get("fetched_via")
+    if via and meta.get("from_cache"):
+        via = f"{via}, cached {meta.get('cache_age_seconds', 0)}s ago"
     lines = [
         f"# {doc.final_url}",
-        f"_Crawled: {_format_timestamp()}_",
+        f"_Crawled: {_format_timestamp()}_" + (f" _via {via}_" if via else ""),
         "",
     ]
+    if meta.get("warning"):
+        lines.extend([f"_Warning: {meta['warning']}_", ""])
 
     if doc.status == "failed":
         lines.append(f"**Error:** {doc.error_message}")
@@ -235,6 +242,27 @@ def _format_output(
 # =============================================================================
 
 
+def _make_approver(ctx: Optional[Context]):
+    """Ask the human (not the model) before Firecrawl spends paid credits."""
+    if ctx is None:
+        return None
+
+    async def approve(prompt: str) -> str:
+        result = await ctx.elicit(prompt, response_type=list(_APPROVAL_CHOICES))
+        if isinstance(result, AcceptedElicitation):
+            return _APPROVAL_CHOICES.get(str(result.data), "no")
+        return "no"
+
+    return approve
+
+
+_APPROVAL_CHOICES = {
+    "Spend on this page": "once",
+    "Spend for the next 30 minutes": "window",
+    "Don't spend": "no",
+}
+
+
 @mcp.tool
 async def crawl(
     urls: List[str],
@@ -244,23 +272,35 @@ async def crawl(
     remove_links: bool = False,
     dedup_mode: str = "exact",
     storage_state: Optional[str] = None,
+    fresh: bool = False,
+    ctx: Optional[Context] = None,
 ):
     """
-    Crawl one or more URLs and extract content as markdown or JSON.
+    Fetch one or more URLs as markdown or JSON. This is the tool for reading any web page.
+
+    Each URL goes through tiers, cheapest first, until one returns a real page:
+    http (fast, no browser) -> browser (Chromium, JavaScript) -> stealth
+    (anti-bot browser, Cloudflare) -> firecrawl (paid; past the free credit
+    allowance the user is asked to approve the spend). Pages are cached, so
+    asking for the same URL again is free. A "Blocked:" error means the user
+    declined the paid tier: do not retry the same URL.
 
     Args:
-        urls: List of URLs to crawl (required). Accepts a single URL or multiple URLs.
+        urls: List of URLs to fetch (required). Accepts a single URL or multiple URLs.
         output_format: 'markdown' (default) or 'json'
             - markdown: Clean concatenated markdown with URL headers and timestamps
-            - json: Full JSON with metadata, references, and statistics
-        concurrency: Maximum concurrent crawls (default: 3)
-        timeout: Per-URL timeout in seconds (default: 15, must be >= 1)
+            - json: Full JSON with metadata (including fetched_via and tiers_tried)
+        concurrency: Maximum concurrent fetches (default: 3)
+        timeout: Per-URL, per-tier timeout in seconds (default: 15, must be >= 1)
         remove_links: Remove all links from the markdown output (default: false)
         dedup_mode: Markdown dedup mode - "exact" (default) or "off"
-        storage_state: Path to Playwright storage_state JSON for authenticated crawling
+            (applies to the browser tier and authenticated crawls)
+        storage_state: Path to Playwright storage_state JSON for authenticated
+            crawling; skips the tiers and uses the browser with that session
+        fresh: Ignore the cache and fetch again (default: false)
 
     Returns:
-        Crawled content in the specified format.
+        Fetched content in the specified format.
 
     Examples:
         # Single page
@@ -289,7 +329,15 @@ async def crawl(
     LOGGER.info("Crawling %d URL(s)...", len(urls))
     auth = {"storage_state": storage_state} if storage_state else None
 
-    if len(urls) == 1:
+    if auth is None:
+        docs = await fetch_chain.fetch_many(
+            urls,
+            approve=_make_approver(ctx),
+            concurrency=concurrency,
+            timeout=timeout,
+            fresh=fresh,
+        )
+    elif len(urls) == 1:
         try:
             doc = await crawl_page_async(
                 urls[0], dedup_mode=dedup_mode, auth=auth, timeout=timeout

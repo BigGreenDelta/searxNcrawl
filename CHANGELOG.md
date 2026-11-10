@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Fetch router behind `crawl` and `search include_content`: each URL tries a Scrapling HTTP fetch (browser TLS fingerprint, trafilatura extraction), then Crawl4AI, then Scrapling's stealth browser, then Firecrawl. A tier is accepted when its page is not a challenge page and has at least `FETCH_MIN_CHARS` characters; a 404/410 ends the chain. `FETCH_TIERS` picks and orders the tiers.
+- Firecrawl tier (`FIRECRAWL_API_KEY`) with a spending guard: once the billing period has used `FIRECRAWL_ASK_AT` credits (default 1450), each call asks the user through MCP elicitation (this page, the next `FIRECRAWL_APPROVAL_MINUTES`, or no). No answer, no elicitation support or an unreadable usage API count as no. Searches never use the paid tier.
+- SQLite page cache (`FETCH_CACHE_PATH`, `FETCH_CACHE_TTL`, default one day); `crawl(fresh=true)` bypasses it.
+
 ## [0.33.2] - 2026-11-05
 
 ### Changed

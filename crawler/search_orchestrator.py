@@ -578,10 +578,13 @@ async def crawl_result_pages(results: Sequence[SearchResult]) -> list[Any]:
     if not results:
         return []
     # Local import: plain searches never load Crawl4AI.
-    from . import crawl_pages_async
+    from . import fetch_chain
 
-    # Same per-page timeout as the MCP crawl tool, so a search stays responsive.
-    return await crawl_pages_async([result.url for result in results], timeout=15)
+    # Free tiers only: a search never spends Firecrawl credits. Same per-page
+    # timeout as the MCP crawl tool, so a search stays responsive.
+    return await fetch_chain.fetch_many(
+        [result.url for result in results], tiers=fetch_chain.free_tiers(), timeout=15
+    )
 
 
 def serialize_search_results(

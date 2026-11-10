@@ -1105,11 +1105,15 @@ async def test_cli_markdown_sources_and_providers_flag(
 
 
 def _mock_page_crawl(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Replace crawl_pages_async; pages under y.example fail. Records URL batches."""
+    """Replace the fetch router; pages under y.example fail. Records URL batches."""
+    from crawler import fetch_chain
+
     batches: list[list[str]] = []
 
-    async def fake_crawl_pages_async(urls, **kwargs):
-        assert kwargs == {"timeout": 15}
+    async def fake_fetch_many(urls, **kwargs):
+        # Search content never reaches the paid Firecrawl tier.
+        assert kwargs == {"tiers": fetch_chain.free_tiers(), "timeout": 15}
+        assert "firecrawl" not in kwargs["tiers"]
         batches.append(list(urls))
         return [
             CrawledDocument(u, u, "failed", "", error_message="Timeout after 15s")
@@ -1118,7 +1122,7 @@ def _mock_page_crawl(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
             for u in urls
         ]
 
-    monkeypatch.setattr(crawler, "crawl_pages_async", fake_crawl_pages_async)
+    monkeypatch.setattr(fetch_chain, "fetch_many", fake_fetch_many)
     return batches
 
 

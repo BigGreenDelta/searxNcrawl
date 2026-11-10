@@ -168,7 +168,14 @@ async def scrape(
         resp = await client.post(
             f"{_api_url()}/scrape",
             headers={"Authorization": f"Bearer {api_key()}"},
-            json={"url": url, "formats": ["markdown"], "onlyMainContent": True},
+            # proxy "auto" retries with Firecrawl's stealth proxy when the basic
+            # one is blocked (Amazon UK needs it); stealth costs more credits.
+            json={
+                "url": url,
+                "formats": ["markdown"],
+                "onlyMainContent": True,
+                "proxy": "auto",
+            },
             timeout=timeout,
         )
         body = resp.json()

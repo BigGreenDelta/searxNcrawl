@@ -124,6 +124,35 @@ def _configure_stdio_encoding() -> None:
         pass
 
 
+class BearerTokenMiddleware:
+    """Pure ASGI check of ``Authorization: Bearer <token>`` on every HTTP request.
+
+    Pure ASGI (not BaseHTTPMiddleware) so streamed MCP responses pass through
+    untouched. Requests to ``/healthz`` skip the check.
+    """
+
+    def __init__(self, app, token: str):
+        self.app = app
+        self._expected = f"Bearer {token}".encode()
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("path") == "/healthz":
+            return await self.app(scope, receive, send)
+        import hmac
+
+        supplied = dict(scope.get("headers") or []).get(b"authorization", b"")
+        if hmac.compare_digest(supplied, self._expected):
+            return await self.app(scope, receive, send)
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [(b"content-type", b"text/plain")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"unauthorized"})
+
+
 def _parse_csv_allowlist(value: Optional[str]) -> Optional[List[str]]:
     """Normalize a comma-separated HTTP allowlist without adding defaults."""
     if value is None:
@@ -692,14 +721,28 @@ Examples:
             LOGGER.info("Allowing HTTP Host headers: %s", allowed_hosts)
             run_kwargs["allowed_hosts"] = allowed_hosts
 
+        from starlette.middleware import Middleware
+
+        middleware: list = []
+        token = os.getenv("MCP_BEARER_TOKEN", "").strip()
+        if token:
+            LOGGER.info("HTTP requests require the MCP_BEARER_TOKEN bearer token")
+            middleware.append(Middleware(BearerTokenMiddleware, token=token))
+        elif args.host not in ("127.0.0.1", "localhost", "::1"):
+            LOGGER.error(
+                "Refusing to listen on %s without MCP_BEARER_TOKEN: anyone on the "
+                "network could fetch through this server and approve Firecrawl spending",
+                args.host,
+            )
+            sys.exit(2)
+
         origins = _parse_csv_allowlist(args.cors_origins)
         if origins is not None:
-            from starlette.middleware import Middleware
             from starlette.middleware.cors import CORSMiddleware
 
             LOGGER.info("CORS enabled for origins: %s", origins)
             run_kwargs["allowed_origins"] = origins
-            run_kwargs["middleware"] = [
+            middleware.append(
                 Middleware(
                     CORSMiddleware,
                     allow_origins=origins,
@@ -707,7 +750,9 @@ Examples:
                     allow_methods=["*"],
                     allow_headers=["*"],
                 ),
-            ]
+            )
+        if middleware:
+            run_kwargs["middleware"] = middleware
 
         run_kwargs["log_level"] = LOG_LEVEL_STR
         mcp.run(**run_kwargs)

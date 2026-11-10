@@ -228,6 +228,46 @@ async def test_not_found_stops_the_chain(tiers):
     assert doc.status == "failed" and doc.error_message == "HTTP 404"
 
 
+def test_json_and_xml_pass_through_raw():
+    import types
+
+    resp = types.SimpleNamespace(
+        status=200,
+        url="https://api.test/x",
+        headers={"content-type": "application/json; charset=utf-8"},
+        body=b'{"a": [1, 2]}',
+        encoding="utf-8",
+    )
+    doc, _ = fetch_chain._doc_from_scrapling("https://api.test/x", resp, "http")
+    assert doc.status == "success"
+    assert '"a"' in doc.markdown and "\\[" not in doc.markdown
+    resp.headers = {"content-type": "application/atom+xml"}
+    resp.body = b"<feed><title>x</title></feed>"
+    doc, _ = fetch_chain._doc_from_scrapling("https://api.test/x", resp, "http")
+    assert doc.markdown == "<feed><title>x</title></feed>"
+
+
+async def test_browser_tier_treats_http_errors_as_failure(monkeypatch):
+    import crawler
+
+    async def fake_crawl(url, timeout=None):
+        return CrawledDocument(
+            request_url=url,
+            final_url=url,
+            status="success",
+            markdown="Cloudflare error 526 page " * 50,
+            metadata={"status_code": 526},
+        )
+
+    monkeypatch.setattr(crawler, "crawl_page_async", fake_crawl)
+    doc, _ = await fetch_chain._tier_browser("https://a.test", 5)
+    assert doc.status == "failed" and doc.error_message == "HTTP 526"
+
+
+def test_login_wall_counts_as_blocked():
+    assert fetch_chain.looks_blocked("Log in to use old Reddit. To keep Reddit safe...")
+
+
 def test_long_article_mentioning_cloudflare_is_not_a_challenge():
     text = "Cloudflare says just a moment... " + "x" * 7000
     assert fetch_chain.looks_blocked(text) is False

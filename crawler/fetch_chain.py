@@ -51,6 +51,10 @@ _CHALLENGE_MARKERS = (
     "access denied",
     "request unsuccessful. incapsula",
     "pardon our interruption",
+    # Login walls: the page exists but is not readable without an account.
+    "log in to use old reddit",
+    "log in to continue",
+    "sign in to continue",
 )
 _CHALLENGE_SCAN_LIMIT = 6000
 # Statuses that end the chain: the page does not exist, another tier won't help.
@@ -123,14 +127,60 @@ def _html_to_markdown(html: str, url: str) -> str:
     return extracted or ""
 
 
+def _content_type(resp) -> str:
+    try:
+        return str((resp.headers or {}).get("content-type", "")).lower()
+    except Exception:
+        return ""
+
+
+def _raw_text(resp) -> str:
+    body = getattr(resp, "body", b"")
+    if isinstance(body, (bytes, bytearray)):
+        encoding = getattr(resp, "encoding", None) or "utf-8"
+        return bytes(body).decode(encoding, errors="replace")
+    return str(body or "")
+
+
+def _passthrough(resp) -> Optional[str]:
+    """JSON, XML, RSS and plain text come back as they are, not as escaped Markdown."""
+    ctype = _content_type(resp)
+    if not any(t in ctype for t in ("json", "xml", "rss", "atom", "text/plain")):
+        return None
+    text = _raw_text(resp)
+    if "json" in ctype:
+        import json
+
+        try:
+            text = json.dumps(json.loads(text), indent=1, ensure_ascii=False)
+        except ValueError:
+            pass
+    return text
+
+
 def _doc_from_scrapling(url: str, resp, tier: str) -> tuple[CrawledDocument, str]:
     status = getattr(resp, "status", None)
+    final_url = str(getattr(resp, "url", None) or url)
+    raw = _passthrough(resp)
+    if raw is not None:
+        meta = {"fetched_via": tier, "status_code": status, "content_type": _content_type(resp)}
+        failed = status is not None and status >= 400
+        return (
+            CrawledDocument(
+                request_url=url,
+                final_url=final_url,
+                status="failed" if failed else "success",
+                markdown=raw,
+                error_message=f"HTTP {status}" if failed else None,
+                metadata=meta,
+            ),
+            "",
+        )
     html = ""
     try:
         html = resp.html_content or ""
     except Exception:
         html = ""
-    final_url = str(getattr(resp, "url", None) or url)
     markdown = _html_to_markdown(html, final_url) if html else ""
     if not markdown:
         try:
@@ -198,6 +248,11 @@ async def _tier_browser(url: str, timeout: int) -> tuple[CrawledDocument, str]:
 
     doc = await crawl_page_async(url, timeout=timeout)
     doc.metadata = {**(doc.metadata or {}), "fetched_via": "browser"}
+    status = doc.metadata.get("status_code")
+    if isinstance(status, int) and status >= 400:
+        # The browser renders error pages too; an HTTP error is not content.
+        doc.status = "failed"
+        doc.error_message = f"HTTP {status}"
     return doc, getattr(doc, "html", None) or ""
 
 

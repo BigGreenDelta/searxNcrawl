@@ -312,7 +312,8 @@ async def crawl(
     (anti-bot browser, Cloudflare) -> firecrawl (paid; past the free credit
     allowance the user is asked to approve the spend). Pages are cached, so
     asking for the same URL again is free. A "Blocked:" error means the user
-    declined the paid tier: do not retry the same URL.
+    declined the paid tier: do not retry the same URL. For reddit.com use
+    reddit_posts / reddit_thread instead: Reddit blocks plain page fetches.
 
     Args:
         urls: List of URLs to fetch (required). Accepts a single URL or multiple URLs.
@@ -607,6 +608,79 @@ async def search(
         error_msg = f"Unexpected error: {str(exc)}"
         LOGGER.error("Search failed in %.1fs: %s", elapsed, error_msg)
         return json.dumps({"error": error_msg, "query": query}, ensure_ascii=False)
+
+
+# =============================================================================
+# REDDIT TOOLS
+# =============================================================================
+
+
+@mcp.tool
+async def reddit_posts(
+    subreddit: Optional[str] = None,
+    sort: str = "hot",
+    time: str = "week",
+    limit: int = 25,
+    query: Optional[str] = None,
+    author: Optional[str] = None,
+):
+    """
+    List Reddit posts. Use this, not crawl, for anything on reddit.com.
+
+    Without query: a live subreddit listing from Reddit RSS (hot, new, top,
+    rising, controversial; time applies to top/controversial). With query
+    and/or author: keyword search in the Arctic Shift archive, newest first.
+    Each post shows its id; pass the id or URL to reddit_thread for comments.
+
+    Args:
+        subreddit: Subreddit name without r/ (e.g. "selfhosted")
+        sort: hot (default), new, top, rising or controversial
+        time: hour, day, week (default), month, year or all
+        limit: Number of posts, 1-100 (default 25)
+        query: Keywords to search in titles and text (archive search)
+        author: Only posts by this user (archive search)
+    """
+    from . import reddit
+
+    try:
+        return await reddit.posts(
+            subreddit, sort=sort, time=time, limit=limit, query=query, author=author
+        )
+    except Exception as exc:
+        return f"Error: {exc}"
+
+
+@mcp.tool
+async def reddit_thread(
+    post: str,
+    comment_limit: int = 200,
+    max_depth: int = 6,
+    max_comment_chars: int = 1500,
+):
+    """
+    Read a Reddit post with its comment tree (best comments first, nested).
+
+    Source: the Arctic Shift archive, because Reddit blocks logged-out JSON.
+    Scores and counts settle about 36 h after posting; very fresh comments can
+    be missing. Collapsed branches say how many replies were not loaded.
+
+    Args:
+        post: Post URL (any reddit.com/.../comments/<id>/... form) or post id
+        comment_limit: Maximum comments to load (default 200, up to 25000)
+        max_depth: Reply depth to expand before collapsing (default 6)
+        max_comment_chars: Truncate longer comments to this many characters (default 1500)
+    """
+    from . import reddit
+
+    try:
+        return await reddit.thread(
+            post,
+            comment_limit=comment_limit,
+            max_depth=max_depth,
+            max_comment_chars=max_comment_chars,
+        )
+    except Exception as exc:
+        return f"Error: {exc}"
 
 
 # =============================================================================

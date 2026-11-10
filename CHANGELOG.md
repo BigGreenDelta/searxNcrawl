@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Firecrawl tier (`FIRECRAWL_API_KEY`) with a spending guard: once the billing period has used `FIRECRAWL_ASK_AT` credits (default 1450), each call asks the user through MCP elicitation (this page, the next `FIRECRAWL_APPROVAL_MINUTES`, or no). No answer, no elicitation support or an unreadable usage API count as no. Searches never use the paid tier.
 - HTTP transport: `MCP_BEARER_TOKEN` requires `Authorization: Bearer <token>` on every request; binding beyond loopback without it is refused.
 - Firecrawl requests use `proxy: "auto"`, so blocked pages retry through Firecrawl's stealth proxy.
+- `reddit_posts` and `reddit_thread` MCP tools. Listings come live from Reddit RSS (hot/new/top/rising/controversial), with the Arctic Shift archive as fallback; keyword and author search and full comment trees (nested, best first, collapsed branches counted) come from Arctic Shift. Archive query timeouts are retried; titles the archive caught while a moderator bot hid the post are recovered from the thread RSS.
+- The `http` tier returns JSON (pretty-printed), XML, RSS/Atom and plain text as they are instead of escaped Markdown.
+- The `browser` tier treats an HTTP 4xx/5xx response as a failure instead of returning the rendered error page; login walls ("log in to continue", old Reddit's) count as blocked.
 - SQLite page cache (`FETCH_CACHE_PATH`, `FETCH_CACHE_TTL`, default one day); `crawl(fresh=true)` bypasses it.
 
 ## [0.33.2] - 2026-11-05

@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `http` tier returns JSON (pretty-printed), XML, RSS/Atom and plain text as they are instead of escaped Markdown.
 - The `browser` tier treats an HTTP 4xx/5xx response as a failure instead of returning the rendered error page; login walls ("log in to continue", old Reddit's) count as blocked.
 - An `http` result that looks like a JavaScript shell (100 KB+ of HTML whose text is under `FETCH_SHELL_RATIO` of it, default 1%) no longer ends the chain: the browser tier renders the page, and the `http` text is only the fallback. AliExpress search pages went from 2 KB of banner text to the full listings.
+- Product pages get a "Product facts" block above the text (title, rating and rating count, price, availability) read from the markup: Amazon's product widgets, otherwise schema.org `Product` JSON-LD. Text extraction used to drop the rating or pick up a carousel product's stars instead. Pages with 4,000+ characters of text never count as script shells (Amazon's 2.5 MB of HTML had tripped the check).
 - SQLite page cache (`FETCH_CACHE_PATH`, `FETCH_CACHE_TTL`, default one day); `crawl(fresh=true)` bypasses it.
 
 ## [0.33.2] - 2026-11-05

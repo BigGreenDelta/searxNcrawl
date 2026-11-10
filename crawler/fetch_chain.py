@@ -121,6 +121,9 @@ def _verdict(doc: CrawledDocument, html: str = "") -> Optional[str]:
 DEFAULT_SHELL_RATIO = 0.01
 # Below this much HTML a low ratio is just a small page with some boilerplate.
 _SHELL_MIN_HTML = 100_000
+# This much text is a real page whatever the ratio: Amazon product pages carry
+# 2.5 MB of HTML around 18 KB of perfectly good text.
+_SHELL_MAX_TEXT = 4000
 
 
 def shell_ratio() -> float:
@@ -137,7 +140,7 @@ def script_shell(doc: CrawledDocument, html: str) -> Optional[str]:
     if ratio <= 0 or len(html) < _SHELL_MIN_HTML:
         return None
     text = len((doc.markdown or "").strip())
-    if text / len(html) >= ratio:
+    if text >= _SHELL_MAX_TEXT or text / len(html) >= ratio:
         return None
     return f"script shell ({text} chars of text in {len(html) // 1024} KB of HTML)"
 
@@ -304,6 +307,20 @@ async def _tier_stealth(url: str, timeout: int) -> tuple[CrawledDocument, str]:
     return _doc_from_scrapling(url, resp, "stealth")
 
 
+def _add_product_facts(doc: CrawledDocument, html: str) -> None:
+    """Put rating/price/availability from the markup above the page text."""
+    from . import product_facts
+
+    try:
+        facts = product_facts.extract(html, doc.final_url or doc.request_url)
+    except Exception as exc:  # never lose a page over its extras
+        LOGGER.debug("product facts failed for %s: %s", doc.request_url, exc)
+        return
+    if facts:
+        doc.markdown = f"{facts}\n{doc.markdown or ''}"
+        doc.metadata["product_facts"] = True
+
+
 _RUNNERS = {"http": _tier_http, "browser": _tier_browser, "stealth": _tier_stealth}
 
 
@@ -355,6 +372,8 @@ async def fetch(
             attempts.append(f"{tier}: {type(exc).__name__}: {exc}"[:300])
             blocked_seen = True
             continue
+        if html and doc.status != "failed":
+            _add_product_facts(doc, html)
         problem = _verdict(doc, html)
         elapsed = time.monotonic() - start
         shell = script_shell(doc, html) if problem is None and tier == "http" else None

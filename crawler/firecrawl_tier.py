@@ -10,7 +10,13 @@ Environment:
     FIRECRAWL_API_KEY: enables the tier (no key, no tier)
     FIRECRAWL_API_URL: API base (default https://api.firecrawl.dev/v2)
     FIRECRAWL_ASK_AT: credits used this period after which every call asks (default 1450)
-    FIRECRAWL_APPROVAL_MINUTES: how long "yes for a while" lasts (default 30)
+    FIRECRAWL_GRANT_CREDITS: how many more credits a "keep going" answer allows
+        before the next prompt (default 100)
+
+A "keep going" answer sets a ceiling of current usage plus the grant. Calls
+stay silent until usage reaches that ceiling, then the next call asks again.
+The grant is dropped when usage falls below where it was given (a new billing
+period) and on server restart, so it can only err towards asking.
 """
 
 from __future__ import annotations
@@ -18,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Literal, Optional
 
@@ -30,13 +35,14 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_API_URL = "https://api.firecrawl.dev/v2"
 DEFAULT_ASK_AT = 1450
-DEFAULT_APPROVAL_MINUTES = 30
+DEFAULT_GRANT_CREDITS = 100
 
-Approval = Literal["once", "window", "no"]
+Approval = Literal["once", "grant", "no"]
 Approver = Callable[[str], Awaitable[Approval]]
 
-_approved_until = 0.0
-# One prompt at a time: parallel fetches wait, then see a "window" approval.
+# Active "keep going" grant: (usage when given, usage ceiling it allows).
+_grant: Optional[tuple[int, int]] = None
+# One prompt at a time: parallel fetches wait, then see the new grant.
 _approval_lock = asyncio.Lock()
 
 
@@ -75,9 +81,25 @@ def ask_at() -> int:
     return _int_env("FIRECRAWL_ASK_AT", DEFAULT_ASK_AT)
 
 
+def grant_credits() -> int:
+    return max(1, _int_env("FIRECRAWL_GRANT_CREDITS", DEFAULT_GRANT_CREDITS))
+
+
 def reset_approval() -> None:
-    global _approved_until
-    _approved_until = 0.0
+    global _grant
+    _grant = None
+
+
+def _granted(status: CreditStatus) -> bool:
+    """True while usage sits inside the active grant; drops a stale grant."""
+    global _grant
+    if _grant is None or status.used is None:
+        return False
+    start, ceiling = _grant
+    if status.used < start:  # usage went down: new billing period
+        _grant = None
+        return False
+    return status.used < ceiling
 
 
 async def credit_status(client: httpx.AsyncClient) -> CreditStatus:
@@ -93,8 +115,12 @@ async def credit_status(client: httpx.AsyncClient) -> CreditStatus:
         remaining = data.get("remainingCredits")
         plan = data.get("planCredits")
         if remaining is None or plan is None:
-            return CreditStatus(None, remaining, plan, "usage response has no credit figures")
-        return CreditStatus(max(0, int(plan) - int(remaining)), int(remaining), int(plan))
+            return CreditStatus(
+                None, remaining, plan, "usage response has no credit figures"
+            )
+        return CreditStatus(
+            max(0, int(plan) - int(remaining)), int(remaining), int(plan)
+        )
     except Exception as exc:
         return CreditStatus(None, None, None, f"credit usage check failed: {exc}")
 
@@ -124,7 +150,7 @@ async def scrape(
     client: Optional[httpx.AsyncClient] = None,
 ) -> CrawledDocument:
     """Scrape ``url`` with Firecrawl, asking for approval past the threshold."""
-    global _approved_until
+    global _grant
     if not enabled():
         return _failed(url, "Firecrawl tier disabled (FIRECRAWL_API_KEY not set)")
 
@@ -133,7 +159,8 @@ async def scrape(
     try:
         async with _approval_lock:
             status = await credit_status(client)
-            if _needs_ok(status) and time.time() >= _approved_until:
+            granted = _granted(status)  # always run: it also drops a stale grant
+            if _needs_ok(status) and not granted:
                 if status.used is None:
                     why = f"Could not read Firecrawl credit usage ({status.error})."
                 else:
@@ -141,6 +168,8 @@ async def scrape(
                         f"Firecrawl has used {status.used} credits this billing period "
                         f"(asks from {ask_at()}; {status.remaining} left)."
                     )
+                    if _grant is not None:
+                        why += " The last keep-going approval is used up."
                 prompt = (
                     f"{why} Free fetch tiers could not read {url}. "
                     "Spend Firecrawl credits on it?"
@@ -159,11 +188,11 @@ async def scrape(
                         credits_used_this_period=status.used,
                         blocked=True,
                     )
-                if answer == "window":
-                    minutes = _int_env(
-                        "FIRECRAWL_APPROVAL_MINUTES", DEFAULT_APPROVAL_MINUTES
+                if answer == "grant" and status.used is not None:
+                    _grant = (status.used, status.used + grant_credits())
+                    LOGGER.info(
+                        "Firecrawl grant: silent until %d credits used", _grant[1]
                     )
-                    _approved_until = time.time() + minutes * 60
 
         resp = await client.post(
             f"{_api_url()}/scrape",
@@ -180,7 +209,9 @@ async def scrape(
         )
         body = resp.json()
         if resp.status_code != 200 or not body.get("success"):
-            return _failed(url, f"Firecrawl HTTP {resp.status_code}: {body.get('error')}")
+            return _failed(
+                url, f"Firecrawl HTTP {resp.status_code}: {body.get('error')}"
+            )
         data = body.get("data") or {}
         meta = data.get("metadata") or {}
         markdown = data.get("markdown") or ""

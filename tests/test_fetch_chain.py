@@ -115,7 +115,9 @@ def _firecrawl_transport(used: int, plan: int = 5000, scrapes: list | None = Non
 
 
 async def _scrape(used: int, approve, scrapes: list):
-    async with httpx.AsyncClient(transport=_firecrawl_transport(used, scrapes=scrapes)) as c:
+    async with httpx.AsyncClient(
+        transport=_firecrawl_transport(used, scrapes=scrapes)
+    ) as c:
         return await firecrawl_tier.scrape("https://a.test", approve, client=c)
 
 
@@ -153,18 +155,56 @@ async def test_firecrawl_without_approver_is_blocked(monkeypatch):
     assert doc.metadata["blocked"] is True and scrapes == []
 
 
-async def test_firecrawl_window_approval_covers_later_calls(monkeypatch):
+async def test_firecrawl_grant_is_silent_until_its_ceiling(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "k")
+    monkeypatch.setenv("FIRECRAWL_GRANT_CREDITS", "50")
+    asked: list[str] = []
+
+    async def approve(prompt):
+        asked.append(prompt)
+        return "grant"
+
+    scrapes: list = []
+    assert (await _scrape(1460, approve, scrapes)).status == "success"
+    assert (await _scrape(1509, approve, scrapes)).status == "success"
+    assert len(asked) == 1
+    # ceiling 1460 + 50 reached: asks again, and grants a fresh 50
+    assert (await _scrape(1510, approve, scrapes)).status == "success"
+    assert len(asked) == 2 and "used up" in asked[1]
+    assert (await _scrape(1559, approve, scrapes)).status == "success"
+    assert len(asked) == 2 and len(scrapes) == 4
+
+
+async def test_firecrawl_grant_ceiling_reached_and_declined_blocks(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "k")
+    answers = iter(["grant", "no"])
+
+    async def approve(prompt):
+        return next(answers)
+
+    scrapes: list = []
+    assert (await _scrape(1450, approve, scrapes)).status == "success"
+    doc = await _scrape(1550, approve, scrapes)
+    assert doc.metadata["blocked"] is True and len(scrapes) == 1
+
+
+async def test_firecrawl_grant_dropped_when_usage_resets(monkeypatch):
     monkeypatch.setenv("FIRECRAWL_API_KEY", "k")
     asked: list[str] = []
 
     async def approve(prompt):
         asked.append(prompt)
-        return "window"
+        return "grant" if len(asked) == 1 else "no"
 
     scrapes: list = []
-    assert (await _scrape(3000, approve, scrapes)).status == "success"
-    assert (await _scrape(3001, approve, scrapes)).status == "success"
-    assert len(asked) == 1 and len(scrapes) == 2
+    assert (await _scrape(1450, approve, scrapes)).status == "success"
+    assert firecrawl_tier._grant == (1450, 1550)
+    # new billing period: usage back under the threshold, no prompt, grant gone
+    assert (await _scrape(10, approve, scrapes)).status == "success"
+    assert firecrawl_tier._grant is None
+    # so reaching the threshold again asks instead of riding the old grant
+    assert (await _scrape(1460, approve, scrapes)).metadata["blocked"] is True
+    assert len(asked) == 2
 
 
 async def test_firecrawl_usage_api_failure_counts_as_needing_approval(monkeypatch):
@@ -188,8 +228,14 @@ async def test_firecrawl_usage_api_failure_counts_as_needing_approval(monkeypatc
 async def test_firecrawl_only_when_free_tiers_return_nothing(tiers, monkeypatch):
     calls, script = tiers
     script["http"] = RuntimeError("boom")
-    script["browser"] = (_doc("https://a.test", "", "browser", "failed", "HTTP 403"), "")
-    script["stealth"] = (_doc("https://a.test", "", "stealth", "failed", "HTTP 403"), "")
+    script["browser"] = (
+        _doc("https://a.test", "", "browser", "failed", "HTTP 403"),
+        "",
+    )
+    script["stealth"] = (
+        _doc("https://a.test", "", "stealth", "failed", "HTTP 403"),
+        "",
+    )
     paid: list[str] = []
 
     async def fake_scrape(url, approve, timeout=60):
@@ -205,8 +251,14 @@ async def test_firecrawl_only_when_free_tiers_return_nothing(tiers, monkeypatch)
 async def test_firecrawl_skipped_when_a_free_tier_had_content(tiers, monkeypatch):
     calls, script = tiers
     script["http"] = (_doc("https://a.test", "short but real", "http"), "")
-    script["browser"] = (_doc("https://a.test", "", "browser", "failed", "HTTP 403"), "")
-    script["stealth"] = (_doc("https://a.test", "", "stealth", "failed", "HTTP 403"), "")
+    script["browser"] = (
+        _doc("https://a.test", "", "browser", "failed", "HTTP 403"),
+        "",
+    )
+    script["stealth"] = (
+        _doc("https://a.test", "", "stealth", "failed", "HTTP 403"),
+        "",
+    )
     paid: list[str] = []
 
     async def fake_scrape(url, approve, timeout=60):

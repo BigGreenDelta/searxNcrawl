@@ -43,7 +43,7 @@ from typing import Any, List, Optional
 from fastmcp import Context, FastMCP
 from fastmcp.server.elicitation import AcceptedElicitation
 
-from . import fetch_chain, search_orchestrator
+from . import fetch_chain, firecrawl_tier, search_orchestrator
 from .document import CrawledDocument
 from .env import load_config
 from .markdown_dedup import demote_headings
@@ -277,19 +277,21 @@ def _make_approver(ctx: Optional[Context]):
         return None
 
     async def approve(prompt: str) -> str:
-        result = await ctx.elicit(prompt, response_type=list(_APPROVAL_CHOICES))
+        choices = _approval_choices()
+        result = await ctx.elicit(prompt, response_type=list(choices))
         if isinstance(result, AcceptedElicitation):
-            return _APPROVAL_CHOICES.get(str(result.data), "no")
+            return choices.get(str(result.data), "no")
         return "no"
 
     return approve
 
 
-_APPROVAL_CHOICES = {
-    "Spend on this page": "once",
-    "Spend for the next 30 minutes": "window",
-    "Don't spend": "no",
-}
+def _approval_choices() -> dict[str, str]:
+    return {
+        "Spend on this page": "once",
+        f"Keep going for the next {firecrawl_tier.grant_credits()} credits": "grant",
+        "Don't spend": "no",
+    }
 
 
 @mcp.tool

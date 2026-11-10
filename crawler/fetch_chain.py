@@ -220,10 +220,13 @@ def _doc_from_scrapling(url: str, resp, tier: str) -> tuple[CrawledDocument, str
         html = ""
     markdown = _html_to_markdown(html, final_url) if html else ""
     if not markdown:
+        # Some Scrapling responses carry ready Markdown; on others `markdown`
+        # is a method, which must never end up as the page text.
         try:
-            markdown = resp.markdown or ""
+            value = getattr(resp, "markdown", None)
         except Exception:
-            markdown = ""
+            value = None
+        markdown = value if isinstance(value, str) else ""
     meta = {"fetched_via": tier, "status_code": status}
     if status is not None and status >= 400:
         return (
@@ -311,12 +314,18 @@ def _add_product_facts(doc: CrawledDocument, html: str) -> None:
     """Put rating/price/availability from the markup above the page text."""
     from . import product_facts
 
+    url = doc.final_url or doc.request_url
     try:
-        facts = product_facts.extract(html, doc.final_url or doc.request_url)
+        results = product_facts.listing(html, url)
+        facts = None if results else product_facts.extract(html, url)
     except Exception as exc:  # never lose a page over its extras
         LOGGER.debug("product facts failed for %s: %s", doc.request_url, exc)
         return
-    if facts:
+    if results:
+        # A store search page: the clean list replaces the tracking-link text.
+        doc.markdown = results
+        doc.metadata["product_facts"] = True
+    elif facts:
         doc.markdown = f"{facts}\n{doc.markdown or ''}"
         doc.metadata["product_facts"] = True
 

@@ -135,16 +135,84 @@ def _json_ld(tree) -> dict[str, str]:
     return {}
 
 
-def extract(html: str, url: str) -> Optional[str]:
-    """A Markdown "Product facts" block for ``html``, or None if there is none."""
+def _parse(html: str, url: str):
     if not html or "<" not in html:
         return None
     try:
         import lxml.html
 
-        tree = lxml.html.fromstring(html)
+        return lxml.html.fromstring(html)
     except Exception as exc:
         LOGGER.debug("product facts: cannot parse %s: %s", url, exc)
+        return None
+
+
+_AMAZON_SEARCH_PATH = re.compile(r"^/(s|s/.*)$")
+_LISTING_MIN = 3
+_RATING_COUNT = re.compile(r"^[\d,.]+K? ratings?$", re.IGNORECASE)
+_BOUGHT = re.compile(r"[\d,.]+K?\+ bought in past month", re.IGNORECASE)
+
+
+def listing(html: str, url: str) -> Optional[str]:
+    """Amazon search results as one clean line each, or None for other pages.
+
+    The extracted text of a search page has no star ratings and wraps every
+    price in a long tracking link; the result cards carry all of it in markup.
+    """
+    parsed = urlparse(url)
+    if not (
+        _AMAZON_HOST.search(parsed.hostname or "")
+        and _AMAZON_SEARCH_PATH.match(parsed.path or "")
+    ):
+        return None
+    tree = _parse(html, url)
+    if tree is None:
+        return None
+    base = f"{parsed.scheme or 'https'}://{parsed.hostname}"
+    lines: list[str] = []
+    seen: set[str] = set()
+    for card in tree.xpath('//*[@data-component-type="s-search-result"]'):
+        asin = card.get("data-asin") or ""
+        if not asin or asin in seen:
+            continue
+        seen.add(asin)
+        title = _first_text(card, [".//h2"])
+        if not title:
+            continue
+        parts = [f"**{title}**"]
+        price = _first_text(
+            card,
+            ['.//*[contains(@class,"a-price")]//*[contains(@class,"a-offscreen")]'],
+        )
+        parts.append(price or "no price shown")
+        stars = _first_text(card, ['.//*[contains(@class,"a-icon-alt")]'])
+        if stars:
+            count = next(
+                (
+                    _clean(label)
+                    for label in card.xpath(".//@aria-label")
+                    if _RATING_COUNT.match(_clean(label))
+                ),
+                "",
+            )
+            parts.append(f"{stars}" + (f" ({count})" if count else ""))
+        else:
+            parts.append("no ratings yet")
+        bought = _BOUGHT.search(_clean(card.text_content()))
+        if bought:
+            parts.append(bought.group(0))
+        if card.xpath('.//*[contains(@class,"puis-sponsored-label-text")]'):
+            parts.append("sponsored")
+        lines.append(f"{len(lines) + 1}. " + " - ".join(parts) + f" - {base}/dp/{asin}")
+    if len(lines) < _LISTING_MIN:
+        return None
+    return "## Search results (from page markup)\n\n" + "\n".join(lines) + "\n"
+
+
+def extract(html: str, url: str) -> Optional[str]:
+    """A Markdown "Product facts" block for ``html``, or None if there is none."""
+    tree = _parse(html, url)
+    if tree is None:
         return None
     parsed = urlparse(url)
     facts: dict[str, str] = {}

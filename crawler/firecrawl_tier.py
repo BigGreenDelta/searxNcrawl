@@ -187,6 +187,7 @@ async def scrape(
                         "Blocked: Firecrawl would spend credits and the user did not approve",
                         credits_used_this_period=status.used,
                         blocked=True,
+                        approval_reason=why,
                     )
                 if answer == "grant" and status.used is not None:
                     _grant = (status.used, status.used + grant_credits())

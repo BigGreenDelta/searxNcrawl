@@ -40,8 +40,9 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, List, Optional
 
+import mcp.types as mcp_types
 from fastmcp import Context, FastMCP
-from fastmcp.server.elicitation import AcceptedElicitation
+from fastmcp.server.elicitation import AcceptedElicitation, parse_elicit_response_type
 
 from . import fetch_chain, firecrawl_tier, search_orchestrator
 from .document import CrawledDocument
@@ -294,6 +295,107 @@ def _approval_choices() -> dict[str, str]:
     }
 
 
+# MCP 2026-07-28 has no server-initiated requests, so ctx.elicit() cannot ask
+# mid-call. There the tool returns an InputRequiredResult instead: the client
+# shows the question to the user and repeats the call with the answer in
+# input_responses (SEP-2322). The answer comes from the client, not from tool
+# arguments, so the model cannot approve spending on its own.
+_SPEND_INPUT = "firecrawl_spend"
+
+
+def _modern(ctx: Optional[Context]) -> bool:
+    return ctx is not None and ctx._is_modern_protocol()
+
+
+def _spend_answer(ctx: Context) -> Optional[str]:
+    """The user's answer from a previous round, or None if not asked yet."""
+    responses = ctx.input_responses or {}
+    result = responses.get(_SPEND_INPUT)
+    if result is None:
+        return None
+    if getattr(result, "action", None) != "accept":
+        return "no"
+    value = (getattr(result, "content", None) or {}).get("value")
+    return _approval_choices().get(str(value), "no")
+
+
+def _spend_request(blocked: List[CrawledDocument]) -> mcp_types.InputRequiredResult:
+    urls = [d.request_url for d in blocked]
+    why = blocked[0].metadata.get("approval_reason") or "Firecrawl would spend credits."
+    if len(urls) == 1:
+        message = f"{why} Free fetch tiers could not read {urls[0]}. Spend Firecrawl credits on it?"
+    else:
+        listed = "\n".join(f"- {u}" for u in urls)
+        message = (
+            f"{why} Free fetch tiers could not read {len(urls)} pages:\n{listed}\n"
+            'Spend Firecrawl credits on them? ("this page" covers all of them)'
+        )
+    schema = parse_elicit_response_type(list(_approval_choices())).schema
+    return mcp_types.InputRequiredResult(
+        input_requests={
+            _SPEND_INPUT: mcp_types.ElicitRequest(
+                params=mcp_types.ElicitRequestFormParams(
+                    message=message, requested_schema=schema
+                )
+            )
+        },
+        request_state=json.dumps(urls),
+    )
+
+
+async def _deny(prompt: str) -> str:
+    return "no"
+
+
+def _answer_approver(answer: str):
+    """Replays the user's answer: "grant" opens one grant, later asks are no."""
+    used = {"grant": False}
+
+    async def approve(prompt: str) -> str:
+        if answer == "grant":
+            if used["grant"]:
+                return "no"
+            used["grant"] = True
+        return answer
+
+    return approve
+
+
+async def _fetch_with_spend_input(
+    ctx: Context, urls: List[str], *, concurrency: int, timeout: int, fresh: bool
+):
+    """crawl's fetch on 2026-07-28: ask via InputRequiredResult when needed."""
+    answer = _spend_answer(ctx)
+    if answer is None:
+        docs = await fetch_chain.fetch_many(
+            urls, approve=_deny, concurrency=concurrency, timeout=timeout, fresh=fresh
+        )
+        needs_ok = [d for d in docs if d.metadata.get("approval_reason")]
+        return _spend_request(needs_ok) if needs_ok else docs
+
+    try:
+        asked = set(json.loads(ctx.request_state or "[]"))
+    except ValueError:
+        asked = set()
+    paid = [u for u in urls if u in asked]
+    rest = [u for u in urls if u not in asked]
+    # Pages that needed no approval last round come from the cache; the asked
+    # ones already failed every free tier, so they go straight to Firecrawl.
+    rest_docs = await fetch_chain.fetch_many(
+        rest, approve=_deny, concurrency=concurrency, timeout=timeout, fresh=fresh
+    )
+    paid_docs = await fetch_chain.fetch_many(
+        paid,
+        approve=_answer_approver(answer),
+        tiers=["firecrawl"],
+        concurrency=concurrency,
+        timeout=timeout,
+        fresh=True,
+    )
+    by_url = dict(zip(rest, rest_docs)) | dict(zip(paid, paid_docs))
+    return [by_url[u] for u in urls]
+
+
 @mcp.tool
 async def crawl(
     urls: List[str],
@@ -361,7 +463,15 @@ async def crawl(
     LOGGER.info("Crawling %d URL(s)...", len(urls))
     auth = {"storage_state": storage_state} if storage_state else None
 
-    if auth is None:
+    if auth is None and _modern(ctx):
+        result = await _fetch_with_spend_input(
+            ctx, urls, concurrency=concurrency, timeout=timeout, fresh=fresh
+        )
+        if isinstance(result, mcp_types.InputRequiredResult):
+            LOGGER.info("Asking the user before Firecrawl spends credits")
+            return result
+        docs = result
+    elif auth is None:
         docs = await fetch_chain.fetch_many(
             urls,
             approve=_make_approver(ctx),

@@ -134,6 +134,16 @@ def test_amazon_search_results_one_line_each():
     assert len(lines) == 3  # duplicate ASIN dropped
 
 
+def test_search_card_with_separate_brand_heading():
+    card = _card("B000000009", "HS-03 Cordless Iron", "£81.99").replace(
+        "<h2", "<h2><span>FNIRSI</span></h2><h2", 1
+    )
+    out = product_facts.listing(
+        SEARCH.replace("</body>", card + "</body>"), "https://www.amazon.co.uk/s?k=x"
+    )
+    assert "**FNIRSI - HS-03 Cordless Iron** - £81.99" in out
+
+
 def test_search_listing_only_for_amazon_search_pages():
     assert (
         product_facts.listing(SEARCH, "https://www.amazon.co.uk/dp/B000000001") is None

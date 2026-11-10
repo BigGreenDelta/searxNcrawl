@@ -176,7 +176,10 @@ def listing(html: str, url: str) -> Optional[str]:
         if not asin or asin in seen:
             continue
         seen.add(asin)
-        title = _first_text(card, [".//h2"])
+        # Some cards put the brand in its own h2 above the title: join them.
+        heads = [_clean(h.text_content()) for h in card.xpath(".//h2")]
+        heads = [h for i, h in enumerate(heads) if h and h not in heads[:i]]
+        title = " - ".join(heads)
         if not title:
             continue
         parts = [f"**{title}**"]

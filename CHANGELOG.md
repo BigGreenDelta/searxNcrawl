@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An `http` page whose extracted text is under `FETCH_MIN_COVERAGE` (default 25%) of the text the page shows also goes on to the browser: extraction had reduced store category pages to an intro paragraph and a contact page to its cookie banner. When the `http` text was a shell or partial and the browser comes back thin, stealth gets a try. If only that `http` text is left, it is returned with an "incomplete page" warning and is not cached.
 - JSON-LD product data: several JSON objects in one script tag, `ProductGroup` variants (each with its price, plus the overall range), `AggregateOffer` and `priceSpecification` prices.
 
+- On contact, about and support pages, `tel:` and `mailto:` links that the text conversion cut (they usually sit in the trimmed header or footer) are listed at the end as "Contact links on the page".
+
 ### Fixed
 - AliExpress's slider CAPTCHA ("CAPTCHA Verification", "drag the slider to verify", the `_____tmd_____/punish` redirect) counts as a challenge page instead of a thin one, so stealth and then Firecrawl (behind the spending guard) get their turn. Challenge markers are now also matched in the visible text, not only in the first 6 KB of HTML.
 - A shell or partial `http` page no longer makes the chain skip Firecrawl as "a free tier returned the page". When nothing better comes back, or the spend is declined, the result is `status: failed` with an "Incomplete page" error, `metadata.incomplete`, and the partial text still attached; it is never cached.

@@ -394,6 +394,41 @@ def _add_product_facts(doc: CrawledDocument, html: str) -> None:
         doc.metadata["product_facts"] = True
 
 
+_CONTACT_PATH = re.compile(
+    r"contact|about|support|help|impressum|kontakt|find-us|locations?|stores?|branch",
+    re.IGNORECASE,
+)
+_TEL_HREF = re.compile(r'href=["\']tel:([^"\']+)["\']', re.IGNORECASE)
+_MAIL_HREF = re.compile(r'href=["\']mailto:([^"\'?]+)', re.IGNORECASE)
+
+
+def _add_contact_links(doc: CrawledDocument, html: str) -> None:
+    """On contact-type pages, keep phone/e-mail links the text conversion cut.
+
+    Both extractors trim headers and footers, which is where many sites put
+    the phone number (telonic.co.uk/contact/ lost its only one).
+    """
+    from urllib.parse import unquote, urlparse
+
+    if not _CONTACT_PATH.search(urlparse(doc.final_url or doc.request_url).path or ""):
+        return
+    text = doc.markdown or ""
+    digits = re.sub(r"\D", "", text)
+    found: list[str] = []
+    for raw in dict.fromkeys(_TEL_HREF.findall(html)):
+        number = unquote(raw).strip()
+        if number and re.sub(r"\D", "", number) not in digits:
+            found.append(f"phone {number}")
+    for raw in dict.fromkeys(_MAIL_HREF.findall(html)):
+        mail = unquote(raw).strip()
+        if mail and mail.lower() not in text.lower():
+            found.append(f"e-mail {mail}")
+    if found:
+        doc.markdown = (
+            f"{text.rstrip()}\n\nContact links on the page: {'; '.join(found[:6])}\n"
+        )
+
+
 def _incomplete(
     doc: CrawledDocument,
     reason: str,
@@ -487,6 +522,7 @@ async def fetch(
             continue
         if html and doc.status != "failed":
             _add_product_facts(doc, html)
+            _add_contact_links(doc, html)
         problem = _verdict(doc, html)
         elapsed = time.monotonic() - start
         reason = (

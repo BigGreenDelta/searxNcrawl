@@ -220,6 +220,42 @@ def test_json_ld_product_group_variants():
     assert "**Price:** 45-49 GBP" in facts
 
 
+def test_contact_page_keeps_phone_and_mail_links():
+    html = (
+        '<html><header><a href="tel:01189786911">Call</a>'
+        '<a href="mailto:sales@shop.test?subject=x">Mail</a></header>'
+        "<p>Address: 1 High St</p></html>"
+    )
+    doc = CrawledDocument(
+        "https://shop.test/contact/",
+        "https://shop.test/contact/",
+        "success",
+        "Address: 1 High St",
+    )
+    fetch_chain._add_contact_links(doc, html)
+    assert (
+        "Contact links on the page: phone 01189786911; e-mail sales@shop.test"
+        in doc.markdown
+    )
+
+
+def test_contact_links_skipped_when_already_in_text_or_not_contact_page():
+    html = '<a href="tel:0118 978 6911">x</a>'
+    doc = CrawledDocument(
+        "https://shop.test/contact",
+        "https://shop.test/contact",
+        "success",
+        "Call 0118 978 6911",
+    )
+    fetch_chain._add_contact_links(doc, html)
+    assert "Contact links" not in doc.markdown
+    other = CrawledDocument(
+        "https://shop.test/p/1", "https://shop.test/p/1", "success", "Product"
+    )
+    fetch_chain._add_contact_links(other, html)
+    assert other.markdown == "Product"
+
+
 def test_plain_page_has_no_facts():
     assert product_facts.extract("<html><p>Hello</p></html>", "https://a.test") is None
     assert product_facts.extract(AMAZON, "https://www.amazon.co.uk/s?k=mat") is None

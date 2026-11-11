@@ -293,9 +293,9 @@ def _make_approver(ctx: Optional[Context]):
 
 def _approval_choices() -> dict[str, str]:
     return {
-        "Spend on this page": "once",
-        f"Keep going for the next {firecrawl_tier.grant_credits()} credits": "grant",
-        "Don't spend": "no",
+        "Yes, just this time": "once",
+        f"Yes, and stop asking for the next {firecrawl_tier.grant_credits()} credits": "grant",
+        "No": "no",
     }
 
 
@@ -326,14 +326,7 @@ def _spend_answer(ctx: Context) -> Optional[str]:
 def _spend_request(blocked: List[CrawledDocument]) -> mcp_types.InputRequiredResult:
     urls = [d.request_url for d in blocked]
     why = blocked[0].metadata.get("approval_reason") or "Firecrawl would spend credits."
-    if len(urls) == 1:
-        message = f"{why} Free fetch tiers could not read {urls[0]}. Spend Firecrawl credits on it?"
-    else:
-        listed = "\n".join(f"- {u}" for u in urls)
-        message = (
-            f"{why} Free fetch tiers could not read {len(urls)} pages:\n{listed}\n"
-            'Spend Firecrawl credits on them? ("this page" covers all of them)'
-        )
+    message = firecrawl_tier.question(urls, why)
     schema = parse_elicit_response_type(list(_approval_choices())).schema
     return mcp_types.InputRequiredResult(
         input_requests={

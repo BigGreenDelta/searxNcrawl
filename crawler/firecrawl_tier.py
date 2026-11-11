@@ -12,6 +12,8 @@ Environment:
     FIRECRAWL_ASK_AT: credits used this period after which every call asks (default 1450)
     FIRECRAWL_GRANT_CREDITS: how many more credits a "keep going" answer allows
         before the next prompt (default 100)
+    FIRECRAWL_FREE_CREDITS: free credits per billing period, used only to tell
+        the user whether a spend is paid (default 1500)
 
 A "keep going" answer sets a ceiling of current usage plus the grant. Calls
 stay silent until usage reaches that ceiling, then the next call asks again.
@@ -23,8 +25,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Literal, Optional
 
 import httpx
@@ -36,6 +40,7 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_API_URL = "https://api.firecrawl.dev/v2"
 DEFAULT_ASK_AT = 1450
 DEFAULT_GRANT_CREDITS = 100
+DEFAULT_FREE_CREDITS = 1500
 
 Approval = Literal["once", "grant", "no"]
 Approver = Callable[[str], Awaitable[Approval]]
@@ -52,6 +57,26 @@ class CreditStatus:
     remaining: Optional[int]
     plan: Optional[int]
     error: Optional[str] = None
+    period_end: Optional[datetime] = None
+
+
+def _parse_time(raw) -> Optional[datetime]:
+    if not raw:
+        return None
+    try:
+        when = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
+def _reset_line(end: Optional[datetime], now: Optional[datetime] = None) -> str:
+    if end is None:
+        return ""
+    now = now or datetime.now(timezone.utc)
+    days = max(0, math.ceil((end - now).total_seconds() / 86400))
+    when = "today" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
+    return f" Credits reset {when} ({end:%Y-%m-%d})."
 
 
 def _int_env(name: str, default: int) -> int:
@@ -83,6 +108,46 @@ def ask_at() -> int:
 
 def grant_credits() -> int:
     return max(1, _int_env("FIRECRAWL_GRANT_CREDITS", DEFAULT_GRANT_CREDITS))
+
+
+def free_credits() -> int:
+    return _int_env("FIRECRAWL_FREE_CREDITS", DEFAULT_FREE_CREDITS)
+
+
+def _reason(status: CreditStatus) -> str:
+    """Why the user is asked: credit usage and whether the spend is paid."""
+    if status.used is None:
+        return f"Could not read Firecrawl credit usage ({status.error}), so asking to be safe."
+    free = free_credits()
+    plan = f" of {status.plan}" if status.plan else ""
+    lines = [
+        f"Credits this billing period: {status.used}{plan} used, {status.remaining} left."
+        + _reset_line(status.period_end)
+    ]
+    if status.used >= free:
+        lines.append(f"The {free} free credits are used up, so this is paid.")
+    else:
+        lines.append(f"{free - status.used} free credits left, then paid.")
+    if _grant is not None:
+        lines.append('Your last "stop asking" approval has run out.')
+    return "\n".join(lines)
+
+
+def question(urls: list[str], reason: str) -> str:
+    """The spend question shown to the user."""
+    if len(urls) == 1:
+        head = f"Read {urls[0]} with Firecrawl?"
+        it = "it"
+    else:
+        listed = "\n".join(f"- {u}" for u in urls)
+        head = f"Read these {len(urls)} pages with Firecrawl?\n{listed}"
+        it = "them"
+    return (
+        f"{head}\n"
+        f"The free fetchers (plain HTTP, browser, stealth browser) could not get {it}.\n\n"
+        f"{reason}\n"
+        f"Cost: {len(urls)} credit{'s' if len(urls) != 1 else ''} (1 a page)."
+    )
 
 
 def reset_approval() -> None:
@@ -119,7 +184,10 @@ async def credit_status(client: httpx.AsyncClient) -> CreditStatus:
                 None, remaining, plan, "usage response has no credit figures"
             )
         return CreditStatus(
-            max(0, int(plan) - int(remaining)), int(remaining), int(plan)
+            max(0, int(plan) - int(remaining)),
+            int(remaining),
+            int(plan),
+            period_end=_parse_time(data.get("billingPeriodEnd")),
         )
     except Exception as exc:
         return CreditStatus(None, None, None, f"credit usage check failed: {exc}")
@@ -161,19 +229,8 @@ async def scrape(
             status = await credit_status(client)
             granted = _granted(status)  # always run: it also drops a stale grant
             if _needs_ok(status) and not granted:
-                if status.used is None:
-                    why = f"Could not read Firecrawl credit usage ({status.error})."
-                else:
-                    why = (
-                        f"Firecrawl has used {status.used} credits this billing period "
-                        f"(asks from {ask_at()}; {status.remaining} left)."
-                    )
-                    if _grant is not None:
-                        why += " The last keep-going approval is used up."
-                prompt = (
-                    f"{why} Free fetch tiers could not read {url}. "
-                    "Spend Firecrawl credits on it?"
-                )
+                why = _reason(status)
+                prompt = question([url], why)
                 answer: Approval = "no"
                 if approve is not None:
                     try:

@@ -67,7 +67,7 @@ async def _call(handler, urls):
 
 async def test_spend_question_reaches_the_user_and_yes_fetches(fake_fetch):
     seen: list[str] = []
-    result = await _call(_handler("Spend on this page", seen), [FREE, WALLED])
+    result = await _call(_handler("Yes, just this time", seen), [FREE, WALLED])
     text = result.content[0].text
     assert "paid page" in text and "free page" in text
     assert len(seen) == 1 and WALLED in seen[0] and "1460" in seen[0]
@@ -84,5 +84,32 @@ async def test_spend_declined_stays_blocked(fake_fetch):
 
 async def test_no_question_when_nothing_needs_paying(fake_fetch):
     seen: list[str] = []
-    result = await _call(_handler("Spend on this page", seen), [FREE])
+    result = await _call(_handler("Yes, just this time", seen), [FREE])
     assert seen == [] and "free page" in result.content[0].text
+
+
+def test_question_says_whether_the_spend_is_paid(monkeypatch: pytest.MonkeyPatch):
+    from crawler import firecrawl_tier as ft
+
+    monkeypatch.setattr(ft, "_grant", None)
+    paid = ft.question([WALLED], ft._reason(ft.CreditStatus(4277, 723, 5000)))
+    assert paid.startswith(f"Read {WALLED} with Firecrawl?")
+    assert "4277 of 5000 used, 723 left" in paid
+    assert "free credits are used up, so this is paid" in paid
+    free = ft._reason(ft.CreditStatus(1460, 3540, 5000))
+    assert "40 free credits left, then paid" in free
+    many = ft.question([FREE, WALLED], free)
+    assert "these 2 pages" in many and f"- {WALLED}" in many and "get them" in many
+    assert "Cost: 2 credits (1 a page)." in many
+
+
+def test_reset_days_from_billing_period_end():
+    from datetime import datetime, timezone
+
+    from crawler import firecrawl_tier as ft
+
+    end = ft._parse_time("2026-11-30T23:59:59Z")
+    now = datetime(2026, 11, 11, 12, tzinfo=timezone.utc)
+    assert ft._reset_line(end, now) == " Credits reset in 20 days (2026-11-30)."
+    assert ft._reset_line(None) == ""
+    assert ft._parse_time("garbage") is None

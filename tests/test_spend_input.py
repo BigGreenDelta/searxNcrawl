@@ -94,7 +94,7 @@ def test_question_says_whether_the_spend_is_paid(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(ft, "_grant", None)
     paid = ft.question([WALLED], ft._reason(ft.CreditStatus(4277, 723, 5000)))
     assert paid.startswith(f"Read {WALLED} with Firecrawl?")
-    assert "4277 of 5000 used, 723 left" in paid
+    assert "4277 of 5000 credits used - 723 left.\nThe 1500 free" in paid
     assert "free credits are used up, so this is paid" in paid
     free = ft._reason(ft.CreditStatus(1460, 3540, 5000))
     assert "40 free credits left, then paid" in free
@@ -110,6 +110,8 @@ def test_reset_days_from_billing_period_end():
 
     end = ft._parse_time("2026-11-30T23:59:59Z")
     now = datetime(2026, 11, 11, 12, tzinfo=timezone.utc)
-    assert ft._reset_line(end, now) == " Credits reset in 20 days (2026-11-30)."
+    assert ft._reset_line(end, now) == "Credits reset in 20 days (2026-11-30)."
+    status = ft.CreditStatus(4284, 716, 5000, period_end=end)
+    assert "716 left.\nCredits reset in" in ft._reason(status)
     assert ft._reset_line(None) == ""
     assert ft._parse_time("garbage") is None

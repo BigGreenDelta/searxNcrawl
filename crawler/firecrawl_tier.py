@@ -76,7 +76,7 @@ def _reset_line(end: Optional[datetime], now: Optional[datetime] = None) -> str:
     now = now or datetime.now(timezone.utc)
     days = max(0, math.ceil((end - now).total_seconds() / 86400))
     when = "today" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
-    return f" Credits reset {when} ({end:%Y-%m-%d})."
+    return f"Credits reset {when} ({end:%Y-%m-%d})."
 
 
 def _int_env(name: str, default: int) -> int:
@@ -120,10 +120,9 @@ def _reason(status: CreditStatus) -> str:
         return f"Could not read Firecrawl credit usage ({status.error}), so asking to be safe."
     free = free_credits()
     plan = f" of {status.plan}" if status.plan else ""
-    lines = [
-        f"Credits this billing period: {status.used}{plan} used, {status.remaining} left."
-        + _reset_line(status.period_end)
-    ]
+    lines = [f"{status.used}{plan} credits used - {status.remaining} left."]
+    if status.period_end is not None:
+        lines.append(_reset_line(status.period_end))
     if status.used >= free:
         lines.append(f"The {free} free credits are used up, so this is paid.")
     else:

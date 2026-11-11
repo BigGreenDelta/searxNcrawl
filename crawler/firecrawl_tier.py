@@ -120,9 +120,10 @@ def _reason(status: CreditStatus) -> str:
         return f"Could not read Firecrawl credit usage ({status.error}), so asking to be safe."
     free = free_credits()
     plan = f" of {status.plan}" if status.plan else ""
-    lines = [f"{status.used}{plan} credits used - {status.remaining} left."]
+    first = f"{status.used}{plan} credits used - {status.remaining} left."
     if status.period_end is not None:
-        lines.append(_reset_line(status.period_end))
+        first += " " + _reset_line(status.period_end)
+    lines = [first]
     if status.used >= free:
         lines.append(f"The {free} free credits are used up, so this is paid.")
     else:
@@ -133,19 +134,20 @@ def _reason(status: CreditStatus) -> str:
 
 
 def question(urls: list[str], reason: str) -> str:
-    """The spend question shown to the user."""
+    """The spend question shown to the user.
+
+    Credits come first: Claude Code shows only the first few lines until the
+    user expands the prompt, and a long URL list would push them out of view.
+    """
     if len(urls) == 1:
-        head = f"Read {urls[0]} with Firecrawl?"
-        it, cost = "it", "Cost: 1 credit."
+        ask = f"Read 1 page with Firecrawl for 1 credit?\n{urls[0]}"
     else:
         listed = "\n".join(f"- {u}" for u in urls)
-        head = f"Read these {len(urls)} pages with Firecrawl?\n{listed}"
-        it, cost = "them", f"Cost: {len(urls)} credits (1 a page)."
-    return (
-        f"{head}\n"
-        f"The free fetchers (plain HTTP, browser, stealth browser) could not get {it}.\n\n"
-        f"{reason}\n{cost}"
-    )
+        ask = (
+            f"Read {len(urls)} pages with Firecrawl for {len(urls)} credits "
+            f"(1 a page)?\n{listed}"
+        )
+    return f"{reason}\n\n{ask}\nThe free fetchers could not get {'it' if len(urls) == 1 else 'them'}."
 
 
 def reset_approval() -> None:

@@ -137,19 +137,15 @@ def question(urls: list[str], reason: str) -> str:
     """The spend question shown to the user."""
     if len(urls) == 1:
         head = f"Read {urls[0]} with Firecrawl?"
-        it = "it"
+        it, cost = "it", "Cost: 1 credit."
     else:
         listed = "\n".join(f"- {u}" for u in urls)
         head = f"Read these {len(urls)} pages with Firecrawl?\n{listed}"
-        it = "them"
+        it, cost = "them", f"Cost: {len(urls)} credits (1 a page)."
     return (
         f"{head}\n"
         f"The free fetchers (plain HTTP, browser, stealth browser) could not get {it}.\n\n"
-        f"{reason}\n"(
-            "Cost: 1 credit."
-            if len(urls) == 1
-            else f"Cost: {len(urls)} credits (1 a page)."
-        )
+        f"{reason}\n{cost}"
     )
 
 

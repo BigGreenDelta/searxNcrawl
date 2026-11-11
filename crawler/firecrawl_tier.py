@@ -145,8 +145,11 @@ def question(urls: list[str], reason: str) -> str:
     return (
         f"{head}\n"
         f"The free fetchers (plain HTTP, browser, stealth browser) could not get {it}.\n\n"
-        f"{reason}\n"
-        f"Cost: {len(urls)} credit{'s' if len(urls) != 1 else ''} (1 a page)."
+        f"{reason}\n"(
+            "Cost: 1 credit."
+            if len(urls) == 1
+            else f"Cost: {len(urls)} credits (1 a page)."
+        )
     )
 
 

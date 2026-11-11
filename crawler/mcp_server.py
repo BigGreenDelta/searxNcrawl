@@ -43,6 +43,7 @@ from typing import Any, List, Optional
 import mcp.types as mcp_types
 from fastmcp import Context, FastMCP
 from fastmcp.server.elicitation import AcceptedElicitation, parse_elicit_response_type
+from mcp.server.request_state import RequestStateSecurity
 
 from . import fetch_chain, firecrawl_tier, search_orchestrator
 from .document import CrawledDocument
@@ -84,9 +85,28 @@ logging.basicConfig(
 )
 LOGGER = logging.getLogger(__name__)
 
+# Sealing for the spend question's requestState (SEP-2322). The SDK default is
+# a per-process key with a 10-minute life: an answer given later, or after a
+# server restart, failed with "Invalid or expired requestState". A key from
+# MCP_REQUEST_STATE_KEY (32+ characters) survives restarts.
+_REQUEST_STATE_TTL = 24 * 3600
+
+
+def _request_state_security() -> RequestStateSecurity:
+    key = os.getenv("MCP_REQUEST_STATE_KEY", "").strip()
+    if len(key) >= 32:
+        return RequestStateSecurity(
+            keys=[key], ttl=_REQUEST_STATE_TTL, audience="web-router"
+        )
+    if key:
+        LOGGER.warning("MCP_REQUEST_STATE_KEY is shorter than 32 characters; ignored")
+    return RequestStateSecurity.ephemeral(ttl=_REQUEST_STATE_TTL, audience="web-router")
+
+
 # Create the MCP server
 mcp = FastMCP(
     name="Web Crawler & Search",
+    request_state_security=_request_state_security(),
     instructions="""
     A web crawler and search server that provides:
 

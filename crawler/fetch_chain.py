@@ -6,7 +6,10 @@
                  pages that need JavaScript.
     3. stealth   Scrapling StealthyFetcher (patched Chromium, Cloudflare
                  Turnstile/interstitial solving), for bot walls.
-    4. firecrawl Paid, behind the spending guard in ``firecrawl_tier``.
+    4. vpn       Optional (``FETCH_VPN_PROXY``): http, then stealth, through a
+                 VPN exit, only after a tier hit a block or challenge. A soft
+                 block is usually on this IP, so a different one gets through.
+    5. firecrawl Paid, behind the spending guard in ``firecrawl_tier``.
 
 A tier's result is accepted when it is not a challenge page and has at least
 ``FETCH_MIN_CHARS`` characters of Markdown. Successful results are cached.
@@ -20,7 +23,10 @@ back thin. If nothing beats it, it is returned with a warning.
 
 Environment:
     FETCH_MIN_CHARS: shortest Markdown accepted as a real page (default 400)
-    FETCH_TIERS: comma-separated tiers to use, in order (default all four)
+    FETCH_TIERS: comma-separated tiers to use, in order (default all; vpn
+        only when FETCH_VPN_PROXY is set)
+    FETCH_VPN_PROXY: proxy URL of a VPN exit for the vpn tier, for example
+        http://127.0.0.1:25345 from wireproxy (unset: no vpn tier)
     FETCH_SHELL_RATIO: text/HTML ratio under which a big http page counts as a
         script shell (default 0.01; 0 turns the check off)
     FETCH_MIN_COVERAGE: extracted/visible text share under which an http page
@@ -41,8 +47,8 @@ from . import firecrawl_tier
 
 LOGGER = logging.getLogger(__name__)
 
-ALL_TIERS = ("http", "browser", "stealth", "firecrawl")
-FREE_TIERS = ("http", "browser", "stealth")
+ALL_TIERS = ("http", "browser", "stealth", "vpn", "firecrawl")
+FREE_TIERS = ("http", "browser", "stealth", "vpn")
 DEFAULT_MIN_CHARS = 400
 
 # Phrases that only appear on bot-wall / challenge pages. Checked on short
@@ -67,6 +73,11 @@ _CHALLENGE_MARKERS = (
     "drag the slider to verify",
     "slide to verify",
     "_____tmd_____/punish",
+    # Amazon soft blocks after many fetches from one IP: a "continue shopping"
+    # interstitial on product pages, a 503 page (served as HTTP 200) on search.
+    "click the button below to continue shopping",
+    "an error occurred when we tried to process your request",
+    "503 - service unavailable error",
     # Login walls: the page exists but is not readable without an account.
     "log in to use old reddit",
     "log in to continue",
@@ -95,12 +106,17 @@ def min_chars() -> int:
         return DEFAULT_MIN_CHARS
 
 
+def vpn_proxy() -> Optional[str]:
+    return os.getenv("FETCH_VPN_PROXY", "").strip() or None
+
+
 def configured_tiers() -> List[str]:
     raw = os.getenv("FETCH_TIERS", "").strip()
     if not raw:
-        return list(ALL_TIERS)
-    tiers = [t.strip().lower() for t in raw.split(",") if t.strip()]
-    return [t for t in tiers if t in ALL_TIERS]
+        tiers = list(ALL_TIERS)
+    else:
+        tiers = [t.strip().lower() for t in raw.split(",") if t.strip()]
+    return [t for t in tiers if t in ALL_TIERS and (t != "vpn" or vpn_proxy())]
 
 
 def free_tiers() -> List[str]:
@@ -315,9 +331,12 @@ def _doc_from_scrapling(url: str, resp, tier: str) -> tuple[CrawledDocument, str
     )
 
 
-async def _tier_http(url: str, timeout: int) -> tuple[CrawledDocument, str]:
+async def _tier_http(
+    url: str, timeout: int, proxy: Optional[str] = None
+) -> tuple[CrawledDocument, str]:
     from scrapling.fetchers import AsyncFetcher
 
+    extra = {"proxy": proxy} if proxy else {}
     resp = await AsyncFetcher.get(
         url,
         impersonate="chrome",
@@ -325,6 +344,7 @@ async def _tier_http(url: str, timeout: int) -> tuple[CrawledDocument, str]:
         follow_redirects=True,
         timeout=timeout,
         retries=1,
+        **extra,
     )
     content_type = ""
     try:
@@ -359,9 +379,12 @@ async def _tier_browser(url: str, timeout: int) -> tuple[CrawledDocument, str]:
     return doc, getattr(doc, "html", None) or ""
 
 
-async def _tier_stealth(url: str, timeout: int) -> tuple[CrawledDocument, str]:
+async def _tier_stealth(
+    url: str, timeout: int, proxy: Optional[str] = None
+) -> tuple[CrawledDocument, str]:
     from scrapling.fetchers import StealthyFetcher
 
+    extra = {"proxy": proxy} if proxy else {}
     resp = await StealthyFetcher.async_fetch(
         url,
         headless=True,
@@ -369,8 +392,21 @@ async def _tier_stealth(url: str, timeout: int) -> tuple[CrawledDocument, str]:
         network_idle=True,
         block_webrtc=True,
         timeout=timeout * 1000,
+        **extra,
     )
     return _doc_from_scrapling(url, resp, "stealth")
+
+
+async def _tier_vpn(url: str, timeout: int) -> tuple[CrawledDocument, str]:
+    """http through the VPN exit, then the stealth browser if that is not enough."""
+    proxy = vpn_proxy()
+    doc, html = await _tier_http(url, timeout, proxy)
+    if _verdict(doc, html) is None and needs_browser(doc, html) is None:
+        doc.metadata["fetched_via"] = "vpn-http"
+        return doc, html
+    doc, html = await _tier_stealth(url, timeout * 3, proxy)
+    doc.metadata["fetched_via"] = "vpn-stealth"
+    return doc, html
 
 
 def _add_product_facts(doc: CrawledDocument, html: str) -> None:
@@ -461,7 +497,12 @@ def _incomplete(
     return doc
 
 
-_RUNNERS = {"http": _tier_http, "browser": _tier_browser, "stealth": _tier_stealth}
+_RUNNERS = {
+    "http": _tier_http,
+    "browser": _tier_browser,
+    "stealth": _tier_stealth,
+    "vpn": _tier_vpn,
+}
 
 
 async def fetch(
@@ -500,6 +541,10 @@ async def fetch(
         # network to go idle and gets one more try.
         if tier == "stealth" and best is not None and not blocked_seen and not partial:
             attempts.append("stealth: skipped, page is short but not blocked")
+            continue
+        # The VPN exit is for blocks on this IP, not for pages that are just short.
+        if tier == "vpn" and not blocked_seen:
+            attempts.append("vpn: skipped, no tier was blocked")
             continue
         # The http text already judged partial is not "a free tier returned the
         # page": Firecrawl stays in play (behind the usual spending guard).

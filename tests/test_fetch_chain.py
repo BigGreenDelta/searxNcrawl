@@ -462,3 +462,90 @@ def test_login_wall_counts_as_blocked():
 def test_long_article_mentioning_cloudflare_is_not_a_challenge():
     text = "Cloudflare says just a moment... " + "x" * 7000
     assert fetch_chain.looks_blocked(text) is False
+
+
+AMAZON_INTERSTITIAL = (
+    "Click the button below to continue shopping\nContinue shopping\n"
+    "Conditions of Use & Sale\nPrivacy Notice"
+)
+AMAZON_503 = (
+    "<html><head><title>503 - Service Unavailable Error</title></head>"
+    "<body>We're sorry. An error occurred when we tried to process your request.</body></html>"
+)
+
+
+def test_amazon_soft_blocks_count_as_blocked():
+    assert fetch_chain.looks_blocked(AMAZON_INTERSTITIAL)
+    assert fetch_chain.looks_blocked("", AMAZON_503)
+
+
+async def test_amazon_interstitial_escalates_past_stealth(tiers):
+    calls, script = tiers
+    url = "https://www.amazon.co.uk/dp/B083V7N12H"
+    script["http"] = (_doc(url, AMAZON_INTERSTITIAL, "http"), "")
+    script["browser"] = (_doc(url, AMAZON_INTERSTITIAL, "browser"), "")
+    script["stealth"] = (_doc(url, LONG, "stealth"), "")
+    doc = await fetch_chain.fetch(url)
+    assert calls == ["http", "browser", "stealth"]
+    assert doc.status == "success" and doc.metadata["fetched_via"] == "stealth"
+
+
+def test_vpn_tier_only_with_a_proxy(monkeypatch):
+    monkeypatch.delenv("FETCH_TIERS", raising=False)
+    monkeypatch.delenv("FETCH_VPN_PROXY", raising=False)
+    assert "vpn" not in fetch_chain.configured_tiers()
+    monkeypatch.setenv("FETCH_VPN_PROXY", "http://127.0.0.1:25345")
+    assert fetch_chain.configured_tiers() == [
+        "http",
+        "browser",
+        "stealth",
+        "vpn",
+        "firecrawl",
+    ]
+
+
+async def test_vpn_tier_after_block_before_firecrawl(tiers, monkeypatch):
+    calls, script = tiers
+    monkeypatch.setenv("FETCH_TIERS", "http,browser,stealth,vpn,firecrawl")
+    monkeypatch.setenv("FETCH_VPN_PROXY", "http://127.0.0.1:25345")
+    url = "https://www.amazon.co.uk/s?k=multimeter"
+    script["http"] = (_doc(url, "", "http"), AMAZON_503)
+    script["browser"] = (_doc(url, "We're sorry", "browser"), AMAZON_503)
+    script["stealth"] = (_doc(url, "We're sorry", "stealth"), AMAZON_503)
+    script["vpn"] = (_doc(url, LONG, "vpn-http"), "")
+    doc = await fetch_chain.fetch(url)
+    assert calls == ["http", "browser", "stealth", "vpn"]
+    assert doc.metadata["fetched_via"] == "vpn-http"
+
+
+async def test_vpn_tier_skipped_for_short_real_pages(tiers, monkeypatch):
+    calls, script = tiers
+    monkeypatch.setenv("FETCH_TIERS", "http,browser,stealth,vpn,firecrawl")
+    monkeypatch.setenv("FETCH_VPN_PROXY", "http://127.0.0.1:25345")
+    script["http"] = (_doc("https://a.test", "short", "http"), "")
+    script["browser"] = (_doc("https://a.test", "still short", "browser"), "")
+    doc = await fetch_chain.fetch("https://a.test")
+    assert calls == ["http", "browser"]
+    assert "vpn: skipped, no tier was blocked" in doc.metadata["tiers_tried"]
+
+
+async def test_vpn_runner_uses_the_proxy_and_falls_back_to_stealth(monkeypatch):
+    seen: list[tuple[str, str | None]] = []
+    monkeypatch.setenv("FETCH_VPN_PROXY", "http://127.0.0.1:25345")
+
+    async def http(url, timeout, proxy=None):
+        seen.append(("http", proxy))
+        return _doc(url, AMAZON_INTERSTITIAL, "http"), ""
+
+    async def stealth(url, timeout, proxy=None):
+        seen.append(("stealth", proxy))
+        return _doc(url, LONG, "stealth"), ""
+
+    monkeypatch.setattr(fetch_chain, "_tier_http", http)
+    monkeypatch.setattr(fetch_chain, "_tier_stealth", stealth)
+    doc, _ = await fetch_chain._tier_vpn("https://a.test", 5)
+    assert seen == [
+        ("http", "http://127.0.0.1:25345"),
+        ("stealth", "http://127.0.0.1:25345"),
+    ]
+    assert doc.metadata["fetched_via"] == "vpn-stealth"

@@ -22,8 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON-LD product data: several JSON objects in one script tag, `ProductGroup` variants (each with its price, plus the overall range), `AggregateOffer` and `priceSpecification` prices.
 
 - On contact, about and support pages, `tel:` and `mailto:` links that the text conversion cut (they usually sit in the trimmed header or footer) are listed at the end as "Contact links on the page".
+- Optional `vpn` fetch tier between stealth and Firecrawl (`FETCH_VPN_PROXY`, for example a local wireproxy exit): after a tier hit a block or challenge, the page is tried again through the VPN, http first, then the stealth browser. Off when the variable is unset; never used for pages that are only short.
 
 ### Fixed
+- Amazon's soft blocks count as challenge pages, not short pages: the "Click the button below to continue shopping" interstitial on product pages and the "503 - Service Unavailable Error" page (sent with HTTP 200) on search. They now escalate to stealth, the VPN tier and Firecrawl instead of coming back as `success`; a Firecrawl result with the same page is a failure.
+- The spend question's `requestState` lived 10 minutes under a per-process key, so a late answer or a server restart failed with "Invalid or expired requestState". It now lasts a day, and `MCP_REQUEST_STATE_KEY` (32+ characters) keeps it valid across restarts.
 - AliExpress's slider CAPTCHA ("CAPTCHA Verification", "drag the slider to verify", the `_____tmd_____/punish` redirect) counts as a challenge page instead of a thin one, so stealth and then Firecrawl (behind the spending guard) get their turn. Challenge markers are now also matched in the visible text, not only in the first 6 KB of HTML.
 - A shell or partial `http` page no longer makes the chain skip Firecrawl as "a free tier returned the page". When nothing better comes back, or the spend is declined, the result is `status: failed` with an "Incomplete page" error, `metadata.incomplete`, and the partial text still attached; it is never cached.
 - The `http` tier could return Scrapling's `markdown` method object as the page text when extraction found nothing (seen on Amazon's intermittent stub page).

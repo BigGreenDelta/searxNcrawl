@@ -28,7 +28,7 @@ async def test_mcp_crawl_forwards_dedup_mode(monkeypatch: pytest.MonkeyPatch) ->
     captured: dict = {}
 
     async def fake_crawl_page_async(
-        url: str, *, dedup_mode: str = "exact", auth=None, timeout=None
+        url: str, *, config=None, dedup_mode: str = "exact", auth=None, timeout=None
     ):
         captured["mode"] = dedup_mode
         captured["auth"] = auth
@@ -94,7 +94,7 @@ async def test_mcp_json_output_includes_builder_guardrail_metadata(
     }
 
     async def fake_crawl_page_async(
-        url: str, *, dedup_mode: str = "exact", auth=None, timeout=None
+        url: str, *, config=None, dedup_mode: str = "exact", auth=None, timeout=None
     ):
         return _doc(metadata=metadata)
 
@@ -121,7 +121,7 @@ async def test_mcp_crawl_auth_error_propagates_from_resolver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_crawl_page_async(
-        url: str, *, dedup_mode: str = "exact", auth=None, timeout=None
+        url: str, *, config=None, dedup_mode: str = "exact", auth=None, timeout=None
     ):
         raise ValueError("Auth storage_state file not found: /tmp/missing.json")
 
@@ -207,3 +207,34 @@ def test_markdown_output_nests_page_headings_under_url_header() -> None:
     assert h1_lines == ["# https://example.com", "# code"] * 2
     assert "## Page\n### Section\n```\n# code\n```" in output
     assert doc.markdown.startswith("# Page")
+
+
+@pytest.mark.asyncio
+async def test_crawl_passes_wait_options_to_the_router(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from crawler import fetch_chain
+    from crawler.config import PageWait
+
+    seen: dict = {}
+
+    async def fake_fetch_many(urls, **kwargs):
+        seen.update(kwargs)
+        return [_doc() for _ in urls]
+
+    monkeypatch.setattr(fetch_chain, "fetch_many", fake_fetch_many)
+    await mcp_server.crawl(
+        urls=["https://example.com"], wait_for="text:Delivered", wait_ms=500
+    )
+    assert seen["wait"] == PageWait(wait_for="text:Delivered", wait_ms=500)
+
+    seen.clear()
+    await mcp_server.crawl(urls=["https://example.com"])
+    assert "wait" not in seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wait_ms", [-1, 30001])
+async def test_crawl_rejects_wait_ms_out_of_range(wait_ms: int) -> None:
+    with pytest.raises(ValueError, match="wait_ms"):
+        await mcp_server.crawl(urls=["https://example.com"], wait_ms=wait_ms)

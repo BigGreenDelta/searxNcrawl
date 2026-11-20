@@ -56,10 +56,22 @@ def cache_path() -> Path:
 
 
 def normalize_url(url: str) -> str:
-    """Cache key: scheme and host lower-cased, fragment dropped."""
+    """Cache key: scheme and host lower-cased, fragment dropped.
+
+    A hash route (``#/...`` or ``#!/...``) is a different page of a
+    single-page app, so it stays: ``/track#/results/A`` and
+    ``/track#/results/B`` must not share an entry.
+    """
     parts = urlsplit(url.strip())
+    fragment = parts.fragment if parts.fragment.startswith(("/", "!/")) else ""
     return urlunsplit(
-        (parts.scheme.lower(), parts.netloc.lower(), parts.path or "/", parts.query, "")
+        (
+            parts.scheme.lower(),
+            parts.netloc.lower(),
+            parts.path or "/",
+            parts.query,
+            fragment,
+        )
     )
 
 

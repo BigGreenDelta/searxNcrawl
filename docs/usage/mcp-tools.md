@@ -8,6 +8,8 @@ Crawl one or more web pages and extract their content.
 
 - `timeout` covers the crawl operation, excluding Chromium installation and browser startup.
 - Unknown `output_format` values fall back to Markdown.
+- The browser tiers wait for script-loaded content before capture: the page text and its finished fetch/XHR requests must stay unchanged for 1.5 s (5 s while "Loading..."-style placeholders are visible), up to 15 s. A page that still shows only loading placeholders, unrendered `{{ template }}` expressions or a bare page shell after that comes back as a failed "incomplete page" with its text attached; it is not cached, and Firecrawl is not paid to wait longer for it.
+- Hash routes (`https://site/app#/results/X`) skip the `http` tier, are rendered in a browser and are cached under their own key.
 
 ### Parameters
 
@@ -20,6 +22,9 @@ Crawl one or more web pages and extract their content.
 | `remove_links` | `bool`      | `false`      | Remove all links from markdown output               |
 | `dedup_mode`   | `str`       | `"exact"`    | `"exact"` or `"off"`                                  |
 | `storage_state` | `str`       | `null`       | Path to Playwright storage state JSON for auth      |
+| `fresh`        | `bool`      | `false`      | Ignore the cache and fetch again                    |
+| `wait_for`     | `str`       | `null`       | CSS selector to wait for, or `text:<text>` to wait for visible text; skips the `http` tier |
+| `wait_ms`      | `int`       | `0`          | Minimum wait before capture in ms (0-30000); skips the `http` tier when set |
 
 ### Examples
 
@@ -41,6 +46,10 @@ crawl(urls=["https://example.com"], storage_state="/path/to/state.json")
 
 # With custom timeout
 crawl(urls=["https://slow-site.com"], timeout=60)
+
+# Wait for script-loaded results
+crawl(urls=["https://track.example/QP123GB"], wait_for="text:Delivered")
+crawl(urls=["https://shop.example/search?q=cable"], wait_for=".result-list li")
 ```
 
 ---

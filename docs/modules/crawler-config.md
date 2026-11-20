@@ -41,7 +41,10 @@ version: 1.1
 |--------|------|------------|----------|---------|
 | `MAIN_SELECTORS` | const | public | `crawler/config.py` | Preferred document content selectors used for extraction targeting. |
 | `MIN_CONTENT_CHARS`, `CONTENT_WAIT_GRACE_MS` | consts | public | `crawler/config.py` | Main-content threshold (50 characters) and body fallback delay (3000 ms). |
-| `build_content_wait_condition` | function | public | `crawler/config.py` | Builds the main-content/body readiness condition. |
+| `build_content_wait_condition` | function | public | `crawler/config.py` | Builds the settle/main-content/body readiness condition. |
+| `PageWait` | dataclass | public | `crawler/config.py` | Explicit `wait_for` selector or `text:` text and `wait_ms` minimum for the browser tiers. |
+| `SETTLE_STABLE_MS`, `SETTLE_PLACEHOLDER_STABLE_MS`, `SETTLE_CAP_MS` | consts | public | `crawler/config.py` | How long the page must stay unchanged (1500 ms, 5000 ms with placeholders) and the cap (15000 ms). |
+| `PLACEHOLDER_PATTERNS`, `TEMPLATE_PATTERN` | consts | public | `crawler/config.py` | Loading-placeholder lines and unrendered `{{ }}` templates, shared by the settle condition and the shell detector. |
 | `wants_page_reload` | function | public | `crawler/config.py` | Identifies default configs without a custom non-empty `js_code` override. |
 | `_shadow_dom_kwargs`, `_load_js_script_escaping_text` | functions | internal | `crawler/config.py` | Detect shadow-DOM support and escape text in Crawl4AI's flattening script. |
 | `reload_after_goto`, `install_reload_hook` | functions | public | `crawler/page_hooks.py` | Reload HTTP(S) pages once before readiness checks; log reload failures and retain the first load. |
@@ -66,7 +69,7 @@ version: 1.1
   - `cache_mode=CacheMode.BYPASS` (`crawler/config.py`)
   - JS scroll snippet; the page reload runs as a Playwright `after_goto` hook (`crawler/page_hooks.py`) for configs from `build_markdown_run_config()` without a custom `js_code` override
   - `flatten_shadow_dom=True` so content rendered into shadow roots (e.g. MDN code examples) reaches the markdown; skipped on Crawl4AI < 0.8.5, and Crawl4AI's flatten script is patched to escape text nodes (see `_load_js_script_escaping_text`)
-  - `wait_for` condition from `build_content_wait_condition()` (`crawler/config.py`): ready when any `MAIN_SELECTORS` area has more than `MIN_CONTENT_CHARS` characters; otherwise falls back to the page body after `CONTENT_WAIT_GRACE_MS` once the document has loaded
+  - `wait_for` condition from `build_content_wait_condition()` (`crawler/config.py`): ready once the document has loaded, the visible text and the number of finished fetch/XHR requests have been unchanged for `SETTLE_STABLE_MS` (`SETTLE_PLACEHOLDER_STABLE_MS` while a `PLACEHOLDER_PATTERNS` line is visible), and a `MAIN_SELECTORS` area has more than `MIN_CONTENT_CHARS` characters; otherwise falls back to the page body after `CONTENT_WAIT_GRACE_MS`. A `PageWait` (`wait_for` selector or `text:` text, `wait_ms` minimum) replaces the settle check. The condition always turns true after `SETTLE_CAP_MS` or at `deadline_epoch_ms`, so an unsettled page is captured instead of failing the crawl
 - `build_discovery_run_config` provides a separate discovery profile (`wait_until="domcontentloaded"`, 2 s extraction delay); current site crawling uses `build_markdown_run_config`, not this factory.
 
 ## Inventory Notes

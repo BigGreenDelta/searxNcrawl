@@ -44,27 +44,134 @@ MIN_CONTENT_CHARS = 50
 # page timeout.
 CONTENT_WAIT_GRACE_MS = 3000
 
+# Script-rendered pages (parcel tracking, store search) show their chrome and a
+# "Loading..." skeleton first and fill in the results a few seconds later, so
+# a content area with text is not enough: the page text and the number of
+# finished fetch/XHR requests must also stay unchanged for SETTLE_STABLE_MS.
+SETTLE_STABLE_MS = 1500
+# While loading placeholders are visible, keep waiting until the page has
+# been unchanged for this long.
+SETTLE_PLACEHOLDER_STABLE_MS = 5000
+# Give up waiting and capture whatever is there after this long.
+SETTLE_CAP_MS = 15000
 
-def build_content_wait_condition() -> str:
+# Regular expressions (valid in JavaScript and Python) for loading placeholder
+# lines: a line that is only "Loading" / "Please wait" / "One moment", a line
+# that starts with a progress verb followed by an ellipsis ("Tracking...Please
+# wait", "Checking the tracking number ..."), or a line of dots only.
+PLACEHOLDER_PATTERNS: List[str] = [
+    r"^[^\S\n]*(?:loading|please wait|one moment)[^\S\n]*(?:\.{1,3}|\u2026)?[^\S\n]*$",
+    r"^[^\S\n]*(?:\d+\.[^\S\n]*)?(?:checking|looking up|locating|fetching|retrieving|searching|tracking|waiting|loading)\b[^\n]{0,40}?(?:\.\.\.|\u2026)",
+    r"^[^\S\n]*[.\u2026\u00b7]{3,}[^\S\n]*$",
+]
+# An unrendered template expression such as {{ item.track_number }}. Checked on
+# the Markdown only, without code blocks: rendered documentation shows them.
+TEMPLATE_PATTERN = r"\{\{[^{}\n]{1,80}\}\}"
+
+
+@dataclass(frozen=True)
+class PageWait:
+    """What a browser tier waits for before it captures the page.
+
+    ``wait_for`` is a CSS selector, or ``text:<text>`` for text that must be
+    visible on the page. ``wait_ms`` is a minimum wait in milliseconds. Both
+    are bounded by the settle cap, so a selector that never appears does not
+    fail the crawl: the page is captured as it is.
+    """
+
+    wait_for: Optional[str] = None
+    wait_ms: int = 0
+
+    @property
+    def text(self) -> Optional[str]:
+        if self.wait_for and self.wait_for.startswith("text:"):
+            return self.wait_for[len("text:") :]
+        return None
+
+    @property
+    def selector(self) -> Optional[str]:
+        if self.wait_for and not self.wait_for.startswith("text:"):
+            return self.wait_for
+        return None
+
+    @property
+    def explicit(self) -> bool:
+        return bool(self.wait_for) or self.wait_ms > 0
+
+
+def build_content_wait_condition(
+    wait: Optional[PageWait] = None,
+    *,
+    cap_ms: int = SETTLE_CAP_MS,
+    deadline_epoch_ms: Optional[int] = None,
+) -> str:
     """Return the ``wait_for`` JS condition used for single-page crawls.
 
-    The condition becomes true as soon as any element matching
+    The condition becomes true when the page has settled: the document has
+    loaded, the visible text and the number of finished fetch/XHR requests have
+    not changed for ``SETTLE_STABLE_MS`` (``SETTLE_PLACEHOLDER_STABLE_MS``
+    while loading placeholders are visible), and an element matching
     ``MAIN_SELECTORS`` contains more than ``MIN_CONTENT_CHARS`` characters of
-    text. If no such element appears, it becomes true once the document has
-    finished loading, ``CONTENT_WAIT_GRACE_MS`` have passed and the body has
-    any text. Crawl4AI polls the condition until it returns true or
-    ``page_timeout`` expires.
+    text. If no such element appears, the body text counts once
+    ``CONTENT_WAIT_GRACE_MS`` have passed. With ``wait.wait_for`` the
+    condition waits for that selector or text instead, and ``wait.wait_ms``
+    sets a minimum wait.
+
+    The condition always turns true ``cap_ms`` after its first check, or at
+    ``deadline_epoch_ms`` (milliseconds since the epoch) if that comes first,
+    even on a page that never settles: Crawl4AI fails a crawl whose condition
+    times out, and a capture of an unsettled page is still worth having.
+    Crawl4AI polls the condition every 100 ms.
     """
+    wait = wait or PageWait()
     selector = json.dumps(", ".join(MAIN_SELECTORS))
+    placeholders = json.dumps(PLACEHOLDER_PATTERNS)
+    deadline = json.dumps(deadline_epoch_ms)
+    target_css = json.dumps(wait.selector)
+    target_text = json.dumps(wait.text)
+    min_ms = max(0, int(wait.wait_ms))
+    cap = max(int(cap_ms), min_ms)
     return f"""js:() => {{
+        const now = Date.now();
+        const s = window.__searxncrawlWait = window.__searxncrawlWait
+            || {{start: now, text: -1, requests: -1, changed: now}};
+        const elapsed = now - s.start;
+        const deadline = {deadline};
+        if (elapsed >= {cap} || (deadline !== null && now >= deadline)) return true;
+        if (!document.body) return false;
+        const text = document.body.innerText || "";
+        const requests = performance.getEntriesByType("resource").filter(
+            (e) => e.initiatorType === "fetch" || e.initiatorType === "xmlhttprequest"
+        ).length;
+        if (text.length !== s.text || requests !== s.requests) {{
+            s.text = text.length;
+            s.requests = requests;
+            s.changed = now;
+        }}
+        if (elapsed < {min_ms}) return false;
+        const targetCss = {target_css};
+        const targetText = {target_text};
+        if (targetCss !== null || targetText !== null) {{
+            if (targetCss !== null) {{
+                try {{
+                    if (!document.querySelector(targetCss)) return false;
+                }} catch (e) {{
+                    return false;
+                }}
+            }}
+            if (targetText !== null && !text.includes(targetText)) return false;
+            return true;
+        }}
+        if (document.readyState !== "complete") return false;
+        const loading = {placeholders}.some((p) => new RegExp(p, "im").test(text));
+        const stable = now - s.changed;
+        if (stable < (loading ? {SETTLE_PLACEHOLDER_STABLE_MS} : {SETTLE_STABLE_MS})) return false;
         const areas = document.querySelectorAll({selector});
         for (const area of areas) {{
             if ((area.innerText || "").trim().length > {MIN_CONTENT_CHARS}) return true;
         }}
-        if (document.readyState !== "complete" || !document.body) return false;
-        window.__searxncrawlWaitStart = window.__searxncrawlWaitStart || Date.now();
-        if (Date.now() - window.__searxncrawlWaitStart < {CONTENT_WAIT_GRACE_MS}) return false;
-        return document.body.innerText.trim().length > 0;
+        if (elapsed < {CONTENT_WAIT_GRACE_MS}) return false;
+        return text.trim().length > 0;
     }}"""
 
 
@@ -252,8 +359,15 @@ def _shadow_dom_kwargs() -> dict:
 
 def build_markdown_run_config(
     overrides: Optional[RunConfigOverrides] = None,
+    *,
+    wait: Optional[PageWait] = None,
+    deadline_epoch_ms: Optional[int] = None,
 ) -> CrawlerRunConfig:
-    """RunConfig for single-page crawls, optimized for main content extraction."""
+    """RunConfig for single-page crawls, optimized for main content extraction.
+
+    ``wait`` and ``deadline_epoch_ms`` shape the readiness condition (see
+    :func:`build_content_wait_condition`); a ``wait_for`` override replaces it.
+    """
     generator = build_markdown_generator()
     config = CrawlerRunConfig(
         verbose=False,
@@ -271,7 +385,9 @@ def build_markdown_run_config(
         # The page reload that used to live here runs as a Playwright hook now
         # (crawler.page_hooks), so it completes before wait_for and capture.
         js_code="window.scrollTo(0, document.body.scrollHeight);",
-        wait_for=build_content_wait_condition(),
+        wait_for=build_content_wait_condition(
+            wait, deadline_epoch_ms=deadline_epoch_ms
+        ),
         **_shadow_dom_kwargs(),
     )
     if overrides:

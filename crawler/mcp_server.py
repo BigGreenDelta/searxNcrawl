@@ -46,6 +46,7 @@ from fastmcp.server.elicitation import AcceptedElicitation, parse_elicit_respons
 from mcp.server.request_state import RequestStateSecurity
 
 from . import fetch_chain, firecrawl_tier, search_orchestrator
+from .config import PageWait
 from .document import CrawledDocument
 from .env import load_config
 from .markdown_dedup import demote_headings
@@ -379,13 +380,25 @@ def _answer_approver(answer: str):
 
 
 async def _fetch_with_spend_input(
-    ctx: Context, urls: List[str], *, concurrency: int, timeout: int, fresh: bool
+    ctx: Context,
+    urls: List[str],
+    *,
+    concurrency: int,
+    timeout: int,
+    fresh: bool,
+    wait: Optional[PageWait] = None,
 ):
     """crawl's fetch on 2026-07-28: ask via InputRequiredResult when needed."""
     answer = _spend_answer(ctx)
+    extra = {"wait": wait} if wait else {}
     if answer is None:
         docs = await fetch_chain.fetch_many(
-            urls, approve=_deny, concurrency=concurrency, timeout=timeout, fresh=fresh
+            urls,
+            approve=_deny,
+            concurrency=concurrency,
+            timeout=timeout,
+            fresh=fresh,
+            **extra,
         )
         needs_ok = [d for d in docs if d.metadata.get("approval_reason")]
         return _spend_request(needs_ok) if needs_ok else docs
@@ -399,7 +412,12 @@ async def _fetch_with_spend_input(
     # Pages that needed no approval last round come from the cache; the asked
     # ones already failed every free tier, so they go straight to Firecrawl.
     rest_docs = await fetch_chain.fetch_many(
-        rest, approve=_deny, concurrency=concurrency, timeout=timeout, fresh=fresh
+        rest,
+        approve=_deny,
+        concurrency=concurrency,
+        timeout=timeout,
+        fresh=fresh,
+        **extra,
     )
     paid_docs = await fetch_chain.fetch_many(
         paid,
@@ -413,6 +431,19 @@ async def _fetch_with_spend_input(
     return [by_url[u] for u in urls]
 
 
+# Longest explicit wait the crawl tool accepts.
+MAX_WAIT_MS = 30000
+
+
+def _wait_config(wait: Optional[PageWait]) -> dict:
+    """``config=`` for an authenticated crawl that has to wait, else nothing."""
+    if wait is None:
+        return {}
+    from .config import build_markdown_run_config
+
+    return {"config": build_markdown_run_config(wait=wait)}
+
+
 @mcp.tool
 async def crawl(
     urls: List[str],
@@ -423,6 +454,8 @@ async def crawl(
     dedup_mode: str = "exact",
     storage_state: Optional[str] = None,
     fresh: bool = False,
+    wait_for: Optional[str] = None,
+    wait_ms: int = 0,
     ctx: Optional[Context] = None,
 ):
     """
@@ -435,6 +468,11 @@ async def crawl(
     asking for the same URL again is free. A "Blocked:" error means the user
     declined the paid tier: do not retry the same URL. For reddit.com use
     reddit_posts / reddit_thread instead: Reddit blocks plain page fetches.
+
+    The browser tiers wait for script-loaded content to settle (up to about
+    15 s). A page that still shows only "Loading..." placeholders or
+    unrendered {{ templates }} comes back as an incomplete page with the text
+    attached, not as the page. Hash routes (#/...) are rendered in a browser.
 
     Args:
         urls: List of URLs to fetch (required). Accepts a single URL or multiple URLs.
@@ -449,6 +487,11 @@ async def crawl(
         storage_state: Path to Playwright storage_state JSON for authenticated
             crawling; skips the tiers and uses the browser with that session
         fresh: Ignore the cache and fetch again (default: false)
+        wait_for: Wait until this CSS selector matches, or with a "text:"
+            prefix until this text is visible (e.g. "text:Delivered"), before
+            capture; skips the http tier. Bounded by the settle cap.
+        wait_ms: Minimum wait in milliseconds before capture, 0-30000
+            (default: 0); skips the http tier when set
 
     Returns:
         Fetched content in the specified format.
@@ -465,11 +508,18 @@ async def crawl(
 
         # Clean output without links
         crawl(urls=["https://example.com"], remove_links=True)
+
+        # A tracking page that fills in its results by script
+        crawl(urls=["https://track.example/QP123GB"], wait_for="text:Delivered")
     """
     from . import crawl_page_async, crawl_pages_async
 
     if timeout < 1:
         raise ValueError("timeout must be >= 1")
+    if not 0 <= wait_ms <= MAX_WAIT_MS:
+        raise ValueError(f"wait_ms must be between 0 and {MAX_WAIT_MS}")
+    wait = PageWait(wait_for=wait_for or None, wait_ms=wait_ms)
+    wait = wait if wait.explicit else None
 
     # Validate output format
     try:
@@ -482,7 +532,7 @@ async def crawl(
 
     if auth is None and _modern(ctx):
         result = await _fetch_with_spend_input(
-            ctx, urls, concurrency=concurrency, timeout=timeout, fresh=fresh
+            ctx, urls, concurrency=concurrency, timeout=timeout, fresh=fresh, wait=wait
         )
         if isinstance(result, mcp_types.InputRequiredResult):
             LOGGER.info("Asking the user before Firecrawl spends credits")
@@ -495,11 +545,16 @@ async def crawl(
             concurrency=concurrency,
             timeout=timeout,
             fresh=fresh,
+            **({"wait": wait} if wait else {}),
         )
     elif len(urls) == 1:
         try:
             doc = await crawl_page_async(
-                urls[0], dedup_mode=dedup_mode, auth=auth, timeout=timeout
+                urls[0],
+                dedup_mode=dedup_mode,
+                auth=auth,
+                timeout=timeout,
+                **_wait_config(wait),
             )
             docs = [doc]
         except Exception as exc:
@@ -519,6 +574,7 @@ async def crawl(
             dedup_mode=dedup_mode,
             auth=auth,
             timeout=timeout,
+            **_wait_config(wait),
         )
 
     successful = sum(1 for d in docs if d.status == "success")

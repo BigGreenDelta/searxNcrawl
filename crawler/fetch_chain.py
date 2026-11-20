@@ -41,6 +41,7 @@ import re
 import time
 from typing import Iterable, List, Optional
 
+from .config import PLACEHOLDER_PATTERNS, SETTLE_CAP_MS, TEMPLATE_PATTERN, PageWait
 from .document import CrawledDocument
 from .fetch_cache import FetchCache
 from . import firecrawl_tier
@@ -219,9 +220,87 @@ def partial_extraction(doc: CrawledDocument, html: str) -> Optional[str]:
     return f"partial text ({text} of {visible} visible chars)"
 
 
+_CODE_FENCE = re.compile(r"```.*?```|`[^`\n]*`", re.DOTALL)
+_TEMPLATE = re.compile(TEMPLATE_PATTERN)
+_MD_PREFIX = re.compile(r"^[\s>#*+\-|]*")
+# Loading placeholders that count against a page's text, shared with the
+# browser's settle condition. Unrendered templates are counted separately.
+_PLACEHOLDER_LINES = [re.compile(p, re.IGNORECASE) for p in PLACEHOLDER_PATTERNS]
+# A shell holds at least this many placeholder lines or templates...
+_SHELL_MIN_MARKERS = 2
+_SHELL_MIN_TEMPLATES = 3
+# ...and less real text than this once they are taken out.
+_SHELL_MAX_REAL_TEXT = 1500
+# A rendered page with this little text in this much HTML has not shown its
+# content yet (Royal Mail tracking: 832 chars in 210 KB). Stricter than the
+# http check: a rendered DOM carries more markup than the served HTML.
+_RENDERED_SHELL_RATIO = 0.005
+_RENDERED_SHELL_MIN_HTML = 150_000
+
+
+def _placeholder_line(line: str) -> bool:
+    bare = _MD_PREFIX.sub("", line).strip().replace("\\", "")
+    return any(p.search(bare) for p in _PLACEHOLDER_LINES)
+
+
+def loading_shell(markdown: str) -> Optional[str]:
+    """Why ``markdown`` looks like a page whose content has not loaded yet.
+
+    Two signs, both only on pages with little other text: loading
+    placeholders ("Loading...", "Checking the tracking number ...", lines of
+    dots) and unrendered ``{{ template }}`` expressions. Code blocks are left
+    out, so documentation that shows template syntax is not a shell.
+    """
+    text = _CODE_FENCE.sub(" ", markdown or "")
+    templates = len(_TEMPLATE.findall(text.replace("\\", "")))
+    text = _TEMPLATE.sub(" ", text.replace("\\", ""))
+    lines = [line for line in text.splitlines() if line.strip()]
+    markers = [line for line in lines if _placeholder_line(line)]
+    real = sum(len(line.strip()) for line in lines if not _placeholder_line(line))
+    if real >= _SHELL_MAX_REAL_TEXT:
+        return None
+    if templates >= _SHELL_MIN_TEMPLATES:
+        return f"unrendered templates ({templates} {{{{ }}}} expressions)"
+    if len(markers) >= _SHELL_MIN_MARKERS:
+        return f"loading placeholders ({len(markers)} lines, {real} chars of other text)"
+    return None
+
+
+def rendered_shell(doc: CrawledDocument, html: str) -> Optional[str]:
+    """Why a browser-rendered page looks like it has not loaded its content."""
+    reason = loading_shell(doc.markdown or "")
+    if reason or doc.metadata.get("product_listing"):
+        return reason
+    text = len((doc.markdown or "").strip())
+    if (
+        len(html) >= _RENDERED_SHELL_MIN_HTML
+        and text < _SHELL_MAX_REAL_TEXT
+        and text / len(html) < _RENDERED_SHELL_RATIO
+    ):
+        return f"script shell ({text} chars of text in {len(html) // 1024} KB of rendered HTML)"
+    return None
+
+
 def needs_browser(doc: CrawledDocument, html: str) -> Optional[str]:
     """Why an accepted http page should still be rendered, or None."""
-    return script_shell(doc, html) or partial_extraction(doc, html)
+    return (
+        loading_shell(doc.markdown or "")
+        or script_shell(doc, html)
+        or partial_extraction(doc, html)
+    )
+
+
+_HASH_ROUTE = re.compile(r"#!?/")
+
+
+def hash_route(url: str) -> bool:
+    """True for single-page-app routes such as ``/track#/results/X``.
+
+    The part after ``#`` never reaches the server, so the http tier gets the
+    bare app; only a browser renders the route.
+    """
+    _, _, fragment = url.partition("#")
+    return bool(fragment) and _HASH_ROUTE.match("#" + fragment) is not None
 
 
 def _html_to_markdown(html: str, url: str) -> str:
@@ -366,10 +445,32 @@ async def _tier_http(
     return _doc_from_scrapling(url, resp, "http")
 
 
-async def _tier_browser(url: str, timeout: int) -> tuple[CrawledDocument, str]:
-    from . import crawl_page_async
+# Time a browser tier keeps after its settle deadline to scroll, capture the
+# HTML and convert it, so the tier timeout does not throw the page away.
+_CAPTURE_MARGIN_S = 6
 
-    doc = await crawl_page_async(url, timeout=timeout)
+
+def settle_cap_ms(timeout: float, wait: Optional[PageWait] = None) -> int:
+    """How long a browser tier may wait for the page to settle, in ms."""
+    wait_ms = wait.wait_ms if wait else 0
+    budget = (timeout - _CAPTURE_MARGIN_S) * 1000
+    return int(max(1000, min(SETTLE_CAP_MS + wait_ms, budget)))
+
+
+def browser_timeout(timeout: int, wait: Optional[PageWait] = None) -> int:
+    """The browser tier's timeout: room for two loads plus the settle wait."""
+    return timeout * 2 + (wait.wait_ms // 1000 if wait else 0)
+
+
+async def _tier_browser(
+    url: str, timeout: int, wait: Optional[PageWait] = None
+) -> tuple[CrawledDocument, str]:
+    from . import crawl_page_async
+    from .config import build_markdown_run_config
+
+    deadline = int(time.time() * 1000) + settle_cap_ms(timeout, wait)
+    config = build_markdown_run_config(wait=wait, deadline_epoch_ms=deadline)
+    doc = await crawl_page_async(url, config=config, timeout=timeout)
     doc.metadata = {**(doc.metadata or {}), "fetched_via": "browser"}
     status = doc.metadata.get("status_code")
     if isinstance(status, int) and status >= 400:
@@ -379,8 +480,32 @@ async def _tier_browser(url: str, timeout: int) -> tuple[CrawledDocument, str]:
     return doc, getattr(doc, "html", None) or ""
 
 
+def _settle_action(cap_ms: int, wait: Optional[PageWait]):
+    """A Scrapling ``page_action`` that waits for the page to settle.
+
+    Network idle alone returns before pages that fetch their results after a
+    timer or a token check; this runs the browser tier's settle condition.
+    A page that never settles is captured as it is once ``cap_ms`` is up.
+    """
+    from .config import build_content_wait_condition
+
+    condition = build_content_wait_condition(wait, cap_ms=cap_ms)[len("js:") :]
+
+    async def settle(page):
+        try:
+            await page.wait_for_function(condition, polling=100, timeout=cap_ms + 2000)
+        except Exception as exc:  # noqa: BLE001 - capture the page as it is
+            LOGGER.debug("Settle wait ended early: %s", exc)
+        return page
+
+    return settle
+
+
 async def _tier_stealth(
-    url: str, timeout: int, proxy: Optional[str] = None
+    url: str,
+    timeout: int,
+    proxy: Optional[str] = None,
+    wait: Optional[PageWait] = None,
 ) -> tuple[CrawledDocument, str]:
     from scrapling.fetchers import StealthyFetcher
 
@@ -392,19 +517,24 @@ async def _tier_stealth(
         network_idle=True,
         block_webrtc=True,
         timeout=timeout * 1000,
+        page_action=_settle_action(settle_cap_ms(timeout, wait), wait),
         **extra,
     )
     return _doc_from_scrapling(url, resp, "stealth")
 
 
-async def _tier_vpn(url: str, timeout: int) -> tuple[CrawledDocument, str]:
+async def _tier_vpn(
+    url: str, timeout: int, wait: Optional[PageWait] = None
+) -> tuple[CrawledDocument, str]:
     """http through the VPN exit, then the stealth browser if that is not enough."""
     proxy = vpn_proxy()
-    doc, html = await _tier_http(url, timeout, proxy)
-    if _verdict(doc, html) is None and needs_browser(doc, html) is None:
-        doc.metadata["fetched_via"] = "vpn-http"
-        return doc, html
-    doc, html = await _tier_stealth(url, timeout * 3, proxy)
+    if not (wait and wait.explicit) and not hash_route(url):
+        doc, html = await _tier_http(url, timeout, proxy)
+        if _verdict(doc, html) is None and needs_browser(doc, html) is None:
+            doc.metadata["fetched_via"] = "vpn-http"
+            return doc, html
+    extra = {"wait": wait} if wait else {}
+    doc, html = await _tier_stealth(url, timeout * 3, proxy, **extra)
     doc.metadata["fetched_via"] = "vpn-stealth"
     return doc, html
 
@@ -512,8 +642,14 @@ async def fetch(
     tiers: Optional[Iterable[str]] = None,
     timeout: int = 20,
     fresh: bool = False,
+    wait: Optional[PageWait] = None,
 ) -> CrawledDocument:
-    """Fetch ``url`` through the tiers until one returns a real page."""
+    """Fetch ``url`` through the tiers until one returns a real page.
+
+    ``wait`` tells the browser tiers what to wait for before capture; with an
+    explicit ``wait_for`` or ``wait_ms`` the http tier is skipped, as it is
+    for hash routes (``#/...``), which only a browser renders.
+    """
     cache = _get_cache()
     if not fresh:
         cached = cache.get(url)
@@ -533,13 +669,29 @@ async def fetch(
     # Why the http text looked partial (script shell, low coverage), if it did.
     partial: Optional[str] = None
     partial_doc: Optional[CrawledDocument] = None
+    # The partial http text is a loading skeleton, worth less than any real text.
+    partial_junk = False
+    # A browser tier rendered the page, but its content had not loaded by the
+    # end of the settle wait (loading placeholders, templates, a bare shell).
+    shell: Optional[str] = None
+    shell_doc: Optional[CrawledDocument] = None
     for tier in order:
+        if tier == "http" and (hash_route(url) or (wait and wait.explicit)):
+            why = "hash route" if hash_route(url) else "wait_for/wait_ms"
+            attempts.append(f"http: skipped, {why} needs a browser")
+            continue
         # A short but real page (no challenge, no error) is not worth a stealth
         # browser or paid credits: those tiers exist for bot walls and failures.
         # A partial http page is different: if the browser came back thin too
         # (it can render before the listings arrive), stealth waits for the
         # network to go idle and gets one more try.
-        if tier == "stealth" and best is not None and not blocked_seen and not partial:
+        if (
+            tier == "stealth"
+            and best is not None
+            and not blocked_seen
+            and not partial
+            and not shell
+        ):
             attempts.append("stealth: skipped, page is short but not blocked")
             continue
         # The VPN exit is for blocks on this IP, not for pages that are just short.
@@ -551,6 +703,11 @@ async def fetch(
         if tier == "firecrawl" and best is not None and best is not partial_doc:
             attempts.append("firecrawl: skipped, a free tier returned the page")
             continue
+        # A browser loaded the page, it just did not show its content in time.
+        # Credits are for pages no free tier can open, not for waiting longer.
+        if tier == "firecrawl" and shell:
+            attempts.append("firecrawl: skipped, a free browser loaded the page")
+            continue
         start = time.monotonic()
         try:
             if tier == "firecrawl":
@@ -559,8 +716,9 @@ async def fetch(
                 )
                 html = ""
             else:
-                tier_timeout = timeout * 3 if tier == "stealth" else timeout
-                doc, html = await _RUNNERS[tier](url, tier_timeout)
+                tier_timeout = _tier_timeout(tier, timeout, wait)
+                extra = {"wait": wait} if wait and tier != "http" else {}
+                doc, html = await _RUNNERS[tier](url, tier_timeout, **extra)
         except Exception as exc:
             attempts.append(f"{tier}: {type(exc).__name__}: {exc}"[:300])
             blocked_seen = True
@@ -573,15 +731,32 @@ async def fetch(
         reason = (
             needs_browser(doc, html) if problem is None and tier == "http" else None
         )
+        if tier == "http" and problem and problem.startswith("thin page"):
+            # A short loading skeleton is a shell too, not a short page.
+            reason = loading_shell(doc.markdown or "")
+            problem = None if reason else problem
         if reason is not None and any(t in order for t in ("browser", "stealth")):
             # Readable but probably not the real content: let a browser render
             # it, and fall back to this text if the browser does no better.
             LOGGER.info("Tier http got %s for %s, trying a browser", reason, url)
             attempts.append(f"http: {reason}")
             partial, partial_doc = reason, doc
+            partial_junk = loading_shell(doc.markdown or "") is not None
             if best is None or len(doc.markdown) > len(best.markdown):
                 best = doc
             continue
+        rendered = tier != "http" and tier != "firecrawl" and doc.status != "failed"
+        if rendered and (problem is None or problem.startswith("thin page")):
+            why = rendered_shell(doc, html) if problem is None else None
+            why = why or loading_shell(doc.markdown or "")
+            if why is not None:
+                # Rendered, but the content had not arrived by the end of the
+                # settle wait. Keep it as a fallback; stealth gets a go.
+                LOGGER.info("Tier %s got %s for %s", tier, why, url)
+                attempts.append(f"{tier}: {why}")
+                if shell_doc is None or len(doc.markdown) > len(shell_doc.markdown):
+                    shell, shell_doc = why, doc
+                continue
         if problem is None:
             LOGGER.info("Fetched %s via %s in %.1fs", url, tier, elapsed)
             doc.metadata["tiers_tried"] = attempts + [f"{tier}: ok"]
@@ -623,9 +798,25 @@ async def fetch(
         if problem == "challenge page" or doc.status == "failed":
             blocked_seen = True
             continue
-        if doc.markdown and (best is None or len(doc.markdown) > len(best.markdown)):
+        if doc.markdown and (
+            best is None
+            or len(doc.markdown) > len(best.markdown)
+            or (best is partial_doc and partial_junk)
+        ):
             best = doc
 
+    if best is not None and best is partial_doc and shell_doc is not None:
+        # Two shells: return the one with more text.
+        if len(shell_doc.markdown) > len(best.markdown):
+            best, partial = None, None
+    if best is None and shell_doc is not None:
+        return _incomplete(
+            shell_doc,
+            shell or "script shell",
+            attempts,
+            url,
+            note="the page did not finish loading its content in any browser tier",
+        )
     if best is not None:
         best.metadata["tiers_tried"] = attempts
         best.request_url = url
@@ -646,6 +837,15 @@ async def fetch(
     )
 
 
+def _tier_timeout(tier: str, timeout: int, wait: Optional[PageWait]) -> int:
+    extra = wait.wait_ms // 1000 if wait else 0
+    if tier == "browser":
+        return browser_timeout(timeout, wait)
+    if tier in ("stealth", "vpn"):
+        return (timeout * 3 if tier == "stealth" else timeout) + extra
+    return timeout
+
+
 async def fetch_many(
     urls: List[str],
     *,
@@ -654,6 +854,7 @@ async def fetch_many(
     concurrency: int = 3,
     timeout: int = 20,
     fresh: bool = False,
+    wait: Optional[PageWait] = None,
 ) -> List[CrawledDocument]:
     import asyncio
 
@@ -662,8 +863,14 @@ async def fetch_many(
 
     async def one(u: str) -> CrawledDocument:
         async with semaphore:
+            extra = {"wait": wait} if wait else {}
             return await fetch(
-                u, approve=approve, tiers=tier_list, timeout=timeout, fresh=fresh
+                u,
+                approve=approve,
+                tiers=tier_list,
+                timeout=timeout,
+                fresh=fresh,
+                **extra,
             )
 
     return list(await asyncio.gather(*(one(u) for u in urls)))

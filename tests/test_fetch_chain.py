@@ -29,8 +29,9 @@ def tiers(monkeypatch: pytest.MonkeyPatch):
     script: dict[str, tuple[CrawledDocument, str] | Exception] = {}
 
     def make(name: str):
-        async def run(url: str, timeout: int):
+        async def run(url: str, timeout: int, **kwargs):
             calls.append(name)
+            script.setdefault("_kwargs", {})[name] = {"timeout": timeout, **kwargs}
             outcome = script[name]
             if isinstance(outcome, Exception):
                 raise outcome
@@ -441,7 +442,7 @@ def test_json_and_xml_pass_through_raw():
 async def test_browser_tier_treats_http_errors_as_failure(monkeypatch):
     import crawler
 
-    async def fake_crawl(url, timeout=None):
+    async def fake_crawl(url, config=None, timeout=None):
         return CrawledDocument(
             request_url=url,
             final_url=url,
@@ -549,3 +550,98 @@ async def test_vpn_runner_uses_the_proxy_and_falls_back_to_stealth(monkeypatch):
         ("stealth", "http://127.0.0.1:25345"),
     ]
     assert doc.metadata["fetched_via"] == "vpn-stealth"
+
+
+# -- script-loaded content (2026-11-20: tracking pages returned as shells) ----
+
+SHELL = "Recently tracked items\nLoading...\nLoading...\nLoading...\n"
+BIG_DOM = "<div></div>" * 20_000
+
+
+async def test_http_loading_shell_goes_to_browser(tiers):
+    calls, script = tiers
+    script["http"] = (_doc("https://a.test", SHELL + "word " * 100, "http"), "")
+    script["browser"] = (_doc("https://a.test", LONG, "browser"), "")
+    doc = await fetch_chain.fetch("https://a.test")
+    assert calls == ["http", "browser"]
+    assert doc.status == "success" and doc.metadata["fetched_via"] == "browser"
+    assert doc.metadata["tiers_tried"][0].startswith("http: loading placeholders")
+
+
+async def test_thin_http_loading_shell_counts_as_partial(tiers):
+    calls, script = tiers
+    script["http"] = (_doc("https://a.test", SHELL, "http"), "")
+    script["browser"] = (_doc("https://a.test", SHELL, "browser"), "")
+    script["stealth"] = (_doc("https://a.test", LONG, "stealth"), "")
+    doc = await fetch_chain.fetch("https://a.test")
+    assert calls == ["http", "browser", "stealth"]
+    assert doc.metadata["fetched_via"] == "stealth"
+
+
+async def test_browser_shell_tries_stealth_never_firecrawl(tiers, monkeypatch):
+    calls, script = tiers
+    script["http"] = (_doc("https://a.test", LONG, "http"), "")
+    script["browser"] = (_doc("https://a.test", SHELL, "browser"), "")
+    script["stealth"] = RuntimeError("Frame was detached")
+    paid: list[str] = []
+
+    async def fake_scrape(url, approve, timeout=60):
+        paid.append(url)
+        return _doc(url, LONG, "firecrawl")
+
+    monkeypatch.setattr(firecrawl_tier, "scrape", fake_scrape)
+    monkeypatch.setattr(fetch_chain, "needs_browser", lambda d, h: "partial text")
+    doc = await fetch_chain.fetch("https://a.test")
+    assert calls == ["http", "browser", "stealth"] and paid == []
+    assert "firecrawl: skipped, a free browser loaded the page" in (
+        doc.metadata["tiers_tried"]
+    )
+
+
+async def test_rendered_shell_returns_incomplete_and_is_not_cached(tiers, monkeypatch):
+    calls, script = tiers
+    monkeypatch.setenv("FETCH_CACHE_TTL", "3600")
+    chrome = "Need help? " * 50
+    script["http"] = (_doc("https://a.test/t#/r/QP1", LONG, "http"), "")
+    script["browser"] = (_doc("https://a.test/t#/r/QP1", chrome, "browser"), BIG_DOM)
+    script["stealth"] = (_doc("https://a.test/t#/r/QP1", chrome, "stealth"), BIG_DOM)
+    doc = await fetch_chain.fetch("https://a.test/t#/r/QP1")
+    # A hash route never goes to the http tier: the server never sees it.
+    assert calls == ["browser", "stealth"]
+    assert doc.status == "failed" and doc.metadata["incomplete"] is True
+    assert "script shell" in doc.error_message and doc.markdown == chrome
+    assert fetch_chain._get_cache().get("https://a.test/t#/r/QP1") is None
+
+
+async def test_real_text_from_stealth_beats_an_http_template_shell(tiers):
+    calls, script = tiers
+    templates = "{{ item.a }} {{ item.b }} {{ item.c }}\n" * 10
+    script["http"] = (_doc("https://a.test", templates, "http"), "")
+    script["browser"] = (_doc("https://a.test", SHELL, "browser"), "")
+    script["stealth"] = (_doc("https://a.test", "Result Pending", "stealth"), "")
+    doc = await fetch_chain.fetch("https://a.test")
+    assert calls == ["http", "browser", "stealth"]
+    assert doc.markdown == "Result Pending" and doc.status == "success"
+
+
+async def test_explicit_wait_skips_http_and_reaches_the_browsers(tiers):
+    from crawler.config import PageWait
+
+    calls, script = tiers
+    wait = PageWait(wait_for="text:Delivered", wait_ms=2000)
+    script["browser"] = (_doc("https://a.test", LONG, "browser"), "")
+    doc = await fetch_chain.fetch("https://a.test", wait=wait, timeout=15)
+    assert calls == ["browser"] and doc.status == "success"
+    assert script["_kwargs"]["browser"] == {"timeout": 32, "wait": wait}
+    assert doc.metadata["tiers_tried"][0] == (
+        "http: skipped, wait_for/wait_ms needs a browser"
+    )
+
+
+def test_settle_cap_fits_inside_the_tier_timeout():
+    from crawler.config import SETTLE_CAP_MS, PageWait
+
+    assert fetch_chain.settle_cap_ms(30) == SETTLE_CAP_MS
+    assert fetch_chain.settle_cap_ms(10) == 4000
+    assert fetch_chain.settle_cap_ms(60, PageWait(wait_ms=5000)) == SETTLE_CAP_MS + 5000
+    assert fetch_chain.browser_timeout(15) == 30

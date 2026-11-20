@@ -113,6 +113,7 @@ def test_reset_days_from_billing_period_end():
     now = datetime(2026, 11, 11, 12, tzinfo=timezone.utc)
     assert ft._reset_line(end, now) == "Credits reset in 20 days (2026-11-30)."
     status = ft.CreditStatus(4284, 716, 5000, period_end=end)
-    assert "716 left. Credits reset in 20 days (2026-11-30).\n" in ft._reason(status)
+    # _reason counts the days from the real clock, not from `now` above.
+    assert f"716 left. {ft._reset_line(end)}\n" in ft._reason(status)
     assert ft._reset_line(None) == ""
     assert ft._parse_time("garbage") is None

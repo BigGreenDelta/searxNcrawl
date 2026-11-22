@@ -460,6 +460,7 @@ async def crawl(
     wait_for: Optional[str] = None,
     wait_ms: int = 0,
     ocr: bool = True,
+    images: bool = False,
     ctx: Optional[Context] = None,
 ):
     """
@@ -483,8 +484,13 @@ async def crawl(
     images, every SKU combination with price, sale price, currency (GBP) and
     stock, the specifications and the full description. Text in the
     description images is read by OCR and shown under each image, marked
-    OCR (ocr=false skips it). An AliExpress slider CAPTCHA returns
-    "blocked by AliExpress anti-bot"; do not retry it right away.
+    OCR (ocr=false skips it). OCR works to a time budget: every description
+    image is listed at the end, marked read or skipped, so the skipped ones
+    can still be opened. images=true also returns those images as image
+    content (JPEG, scaled down) for callers that can see images; it costs
+    many tokens, so leave it off unless the text is not enough. An
+    AliExpress slider CAPTCHA returns "blocked by AliExpress anti-bot"; do
+    not retry it right away.
 
     Args:
         urls: List of URLs to fetch (required). Accepts a single URL or multiple URLs.
@@ -505,7 +511,12 @@ async def crawl(
         wait_ms: Minimum wait in milliseconds before capture, 0-30000
             (default: 0); skips the http tier when set
         ocr: Read text from images where a site route supports it (AliExpress
-            description images; default: true). Adds a few seconds per image.
+            description images; default: true). Runs to a time budget
+            (about 15 s); images past it are listed as skipped.
+        images: Also return the images a site route lists (AliExpress
+            description images) as image content blocks, JPEG, long side
+            up to 1568 px, tall banners cut into tiles (default: false).
+            Each image follows a text line with its label and URL.
 
     Returns:
         Fetched content in the specified format.
@@ -601,7 +612,15 @@ async def crawl(
     successful = sum(1 for d in docs if d.status == "success")
     LOGGER.info("Completed: %d/%d successful", successful, len(docs))
 
-    return _format_output(docs, fmt, remove_links=remove_links)
+    text = _format_output(docs, fmt, remove_links=remove_links)
+    if not images:
+        return text
+    from .page_images import image_blocks
+
+    blocks, note = await image_blocks(docs)
+    if not note:
+        note = "Images: none (no site route listed images for these pages)."
+    return [mcp_types.TextContent(type="text", text=f"{text}\n\n{note}"), *blocks]
 
 
 @mcp.tool

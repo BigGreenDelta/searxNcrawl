@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -13,7 +16,11 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_read_images_limit_and_errors():
+def _pool(n=2):
+    return ThreadPoolExecutor(max_workers=n)
+
+
+def test_read_images_cap_and_errors():
     async def download(url):
         if url.endswith("bad"):
             raise OSError("boom")
@@ -30,16 +37,19 @@ def test_read_images_limit_and_errors():
         ocr.read_images(
             ["u1", "u2bad", "u3empty", "u4broken", "u5", "u6"],
             download,
-            limit=5,
+            cap=5,
             budget=60,
             recogniser=recogniser,
+            executor=_pool(),
         )
     )
     assert result.texts == {"u1": ["U1"], "u5": ["U5"]}
     assert result.skipped["u2bad"] == "download failed: OSError"
     assert result.skipped["u3empty"] == "download failed or image too large"
     assert result.skipped["u4broken"] == "OCR failed: ValueError"
-    assert result.skipped["u6"] == "over the 5-image limit"
+    assert result.skipped["u6"] == "over the 5-image safety cap"
+    # Results come back in page order, whatever order they finished in.
+    assert list(result.skipped) == ["u2bad", "u3empty", "u4broken", "u6"]
 
 
 def test_read_images_time_budget():
@@ -48,14 +58,105 @@ def test_read_images_time_budget():
 
     result = _run(
         ocr.read_images(
-            ["a", "b"], download, limit=10, budget=-1, recogniser=lambda d: ["t"]
+            ["a", "b"],
+            download,
+            cap=10,
+            budget=0,
+            recogniser=lambda d: ["t"],
+            executor=_pool(),
         )
     )
     assert result.texts == {}
     assert result.skipped == {
-        "a": "over the -1 s OCR time budget",
-        "b": "over the -1 s OCR time budget",
+        "a": "over the 0 s OCR time budget",
+        "b": "over the 0 s OCR time budget",
     }
+
+
+def test_downloads_run_at_once():
+    """Each download waits until all three started: serial downloads would hang."""
+    started: list[str] = []
+
+    async def download(url):
+        started.append(url)
+        while len(started) < 3:
+            await asyncio.sleep(0)
+        return url.encode()
+
+    async def go():
+        return await asyncio.wait_for(
+            ocr.read_images(
+                ["a", "b", "c"],
+                download,
+                budget=60,
+                recogniser=lambda d: [d.decode()],
+                executor=_pool(),
+            ),
+            5,
+        )
+
+    result = _run(go())
+    assert result.texts == {"a": ["a"], "b": ["b"], "c": ["c"]}
+
+
+def test_recognitions_run_in_parallel():
+    """Two recognitions meet at a barrier: one at a time would break it."""
+    barrier = threading.Barrier(2, timeout=5)
+
+    def recogniser(data):
+        barrier.wait()
+        return [data.decode()]
+
+    async def download(url):
+        return url.encode()
+
+    result = _run(
+        ocr.read_images(
+            ["a", "b"], download, budget=60, recogniser=recogniser, executor=_pool(2)
+        )
+    )
+    assert result.texts == {"a": ["a"], "b": ["b"]}
+
+
+def test_budget_skips_the_tail_in_page_order():
+    """Downloads finish last-first; recognition still starts in page order,
+    so the image past the budget is the last one, not the first."""
+    order: list[str] = []
+    release = {u: asyncio.Event() for u in "abc"}
+
+    async def download(url):
+        # c arrives first, then b, then a.
+        await release[url].wait()
+        nxt = {"c": "b", "b": "a"}.get(url)
+        if nxt:
+            release[nxt].set()
+        return url.encode()
+
+    def recogniser(data):
+        order.append(data.decode())
+        if data == b"b":
+            time.sleep(0.4)  # b runs past the 0.2 s budget; c never starts
+        return [data.decode()]
+
+    async def go():
+        task = asyncio.ensure_future(
+            ocr.read_images(
+                ["a", "b", "c"],
+                download,
+                budget=0.2,
+                recogniser=recogniser,
+                executor=_pool(1),
+            )
+        )
+        await asyncio.sleep(0)
+        release["c"].set()
+        return await task
+
+    result = _run(go())
+    assert order == ["a", "b"]
+    # b was already running at the deadline, so it finishes and counts.
+    assert result.texts == {"a": ["a"], "b": ["b"]}
+    assert result.skipped == {"c": "over the 0.2 s OCR time budget"}
 
 
 def test_env_caps(monkeypatch):
@@ -63,6 +164,28 @@ def test_env_caps(monkeypatch):
     monkeypatch.setenv("OCR_MAX_BYTES", "junk")
     assert ocr.max_images() == 3
     assert ocr.max_bytes() == ocr.DEFAULT_MAX_BYTES
+    assert ocr.budget_seconds() == ocr.DEFAULT_BUDGET_S == 15
+
+
+@pytest.mark.parametrize(
+    "cpus, env, expected",
+    [
+        (16, {}, (4, 2)),  # 8 cores / 16 threads: 4 x 2 = the 8 cores
+        (8, {}, (2, 2)),
+        (4, {}, (1, 2)),
+        (1, {}, (1, 1)),
+        (32, {}, (4, 4)),
+        (16, {"OCR_WORKERS": "2", "OCR_THREADS": "3"}, (2, 3)),
+        (16, {"OCR_WORKERS": "0", "OCR_THREADS": "junk"}, (4, 2)),
+    ],
+)
+def test_pool_size(monkeypatch, cpus, env, expected):
+    monkeypatch.setattr(ocr.os, "cpu_count", lambda: cpus)
+    for key in ("OCR_WORKERS", "OCR_THREADS"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert (ocr.workers(), ocr.threads_per_worker()) == expected
 
 
 @pytest.mark.skipif(not ocr.available(), reason="rapidocr-onnxruntime not installed")

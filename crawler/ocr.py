@@ -1,15 +1,24 @@
 """Offline text recognition for images that carry text (product descriptions).
 
 Uses RapidOCR (PaddleOCR models on onnxruntime). The models ship inside the
-``rapidocr-onnxruntime`` wheel, so nothing is downloaded at run time. The
-engine is loaded once, on first use, and recognition runs in a worker thread
-so the server's event loop keeps serving other requests.
+``rapidocr-onnxruntime`` wheel, so nothing is downloaded at run time.
+
+All images of a page are downloaded at once. Recognition runs on a small pool
+of worker threads shared by every crawl; each worker loads its own engine on
+first use. onnxruntime gives each engine a few threads of its own, and
+workers x threads stays at about the number of physical cores, so parallel
+pages do not oversubscribe the CPU. Images start recognition in page order,
+so when the time budget runs out the skipped images are the last ones.
 
 Environment:
-    OCR_MAX_IMAGES: images read per page (default 12)
+    OCR_BUDGET_S: wall-clock seconds per page for downloading and reading
+        images; images not started by then are listed as skipped (default 15)
+    OCR_MAX_IMAGES: safety cap on images read per page (default 60)
     OCR_MAX_BYTES: largest image downloaded, in bytes (default 4 MB)
-    OCR_BUDGET_S: seconds of recognition per page; images past it are
-        listed as skipped (default 40)
+    OCR_WORKERS: recognition threads (default: logical CPUs / 4, 1 to 4)
+    OCR_THREADS: onnxruntime threads per worker (default: physical cores
+        (logical / 2) divided by the workers, at least 1)
+    OCR_DOWNLOADS: image downloads at once per page (default 8)
 """
 
 from __future__ import annotations
@@ -20,14 +29,16 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_MAX_IMAGES = 12
+DEFAULT_MAX_IMAGES = 60
 DEFAULT_MAX_BYTES = 4 * 1024 * 1024
-DEFAULT_BUDGET_S = 40.0
+DEFAULT_BUDGET_S = 15.0
+DEFAULT_DOWNLOADS = 8
 # Lines the recogniser is less sure of than this are dropped as noise.
 MIN_SCORE = 0.6
 # Long side of the image handed to the recogniser; larger images are scaled
@@ -35,9 +46,10 @@ MIN_SCORE = 0.6
 _MAX_SIDE = 1600
 
 _WORD = re.compile(r"\w")
-_engine: Any = None
-_engine_lock = threading.Lock()
-_run_lock = threading.Lock()
+# One engine per worker thread: a thread never shares its engine.
+_local = threading.local()
+_pool: Optional[ThreadPoolExecutor] = None
+_pool_lock = threading.Lock()
 
 
 def _env_number(name: str, default: float) -> float:
@@ -60,6 +72,32 @@ def budget_seconds() -> float:
     return _env_number("OCR_BUDGET_S", DEFAULT_BUDGET_S)
 
 
+def downloads() -> int:
+    return max(1, int(_env_number("OCR_DOWNLOADS", DEFAULT_DOWNLOADS)))
+
+
+def _cpus() -> int:
+    return os.cpu_count() or 1
+
+
+def workers() -> int:
+    """Recognition threads: OCR_WORKERS, else a quarter of the logical CPUs."""
+    found = int(_env_number("OCR_WORKERS", 0))
+    return found if found >= 1 else max(1, min(4, _cpus() // 4))
+
+
+def threads_per_worker() -> int:
+    """onnxruntime threads per engine: OCR_THREADS, else cores / workers.
+
+    os.cpu_count() counts logical CPUs; onnxruntime works best on physical
+    cores, so half of them are shared out among the workers.
+    """
+    found = int(_env_number("OCR_THREADS", 0))
+    if found >= 1:
+        return min(found, _cpus())
+    return max(1, (_cpus() // 2) // workers())
+
+
 def available() -> bool:
     try:
         import rapidocr_onnxruntime  # noqa: F401
@@ -69,13 +107,29 @@ def available() -> bool:
 
 
 def _get_engine():
-    global _engine
-    with _engine_lock:
-        if _engine is None:
-            from rapidocr_onnxruntime import RapidOCR
+    """This thread's engine, loaded on first use."""
+    engine = getattr(_local, "engine", None)
+    if engine is None:
+        from rapidocr_onnxruntime import RapidOCR
 
-            _engine = RapidOCR()
-        return _engine
+        engine = RapidOCR(
+            intra_op_num_threads=threads_per_worker(), inter_op_num_threads=1
+        )
+        _local.engine = engine
+    return engine
+
+
+def _get_pool() -> ThreadPoolExecutor:
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            _pool = ThreadPoolExecutor(max_workers=workers(), thread_name_prefix="ocr")
+            LOGGER.info(
+                "OCR pool: %d workers x %d onnxruntime threads",
+                workers(),
+                threads_per_worker(),
+            )
+        return _pool
 
 
 def _slices(image):
@@ -108,15 +162,13 @@ def recognise(data: bytes) -> list[str]:
         raise ValueError("not a readable image")
     engine = _get_engine()
     lines: list[str] = []
-    # One recognition at a time: the engine is shared by all threads.
-    with _run_lock:
-        for part in _slices(image):
-            result, _ = engine(part)
-            for text in rows(result or []):
-                # The slice overlap can read the line on a cut twice.
-                if text in lines[-4:]:
-                    continue
-                lines.append(text)
+    for part in _slices(image):
+        result, _ = engine(part)
+        for text in rows(result or []):
+            # The slice overlap can read the line on a cut twice.
+            if text in lines[-4:]:
+                continue
+            lines.append(text)
     return lines
 
 
@@ -162,7 +214,7 @@ def clean(lines: list[str]) -> list[str]:
 
 @dataclass
 class OcrResult:
-    """Text read from the images of one page, by image URL."""
+    """Text read from the images of one page, by image URL, in page order."""
 
     texts: dict[str, list[str]] = field(default_factory=dict)
     # URL -> why the image was not read (too large, over budget, error, ...).
@@ -173,38 +225,88 @@ class OcrResult:
 Downloader = Callable[[str], Awaitable[Optional[bytes]]]
 
 
+class _OverBudget(Exception):
+    pass
+
+
 async def read_images(
     urls: list[str],
     download: Downloader,
     *,
-    limit: Optional[int] = None,
+    cap: Optional[int] = None,
     budget: Optional[float] = None,
     recogniser: Callable[[bytes], list[str]] = recognise,
+    executor: Optional[ThreadPoolExecutor] = None,
 ) -> OcrResult:
-    """OCR ``urls`` in order, within the image count and time caps."""
-    limit = max_images() if limit is None else limit
+    """OCR ``urls`` within a wall-clock budget and a safety cap.
+
+    Every image downloads at once (up to OCR_DOWNLOADS); recognition runs on
+    the shared worker pool. Images are handed to the pool in page order, and
+    an image whose recognition has not started by the deadline is skipped,
+    so the skipped ones are the tail of the page. Recognitions already
+    running at the deadline finish.
+    """
+    cap = max_images() if cap is None else cap
     budget = budget_seconds() if budget is None else budget
-    result = OcrResult()
     start = time.monotonic()
-    for index, url in enumerate(urls):
-        if index >= limit:
-            result.skipped[url] = f"over the {limit}-image limit"
-            continue
-        if time.monotonic() - start > budget:
-            result.skipped[url] = f"over the {budget:.0f} s OCR time budget"
-            continue
+    deadline = start + budget
+    over = f"over the {budget:g} s OCR time budget"
+    loop = asyncio.get_running_loop()
+    pool = executor or _get_pool()
+    gate = asyncio.Semaphore(downloads())
+    batch = urls[:cap]
+    # handed[i] is set once image i went to the pool (or was dropped), so
+    # image i + 1 waits its turn and the pool queue keeps the page order.
+    handed = [asyncio.Event() for _ in batch]
+    texts: dict[str, list[str]] = {}
+    skipped: dict[str, str] = {}
+
+    def job(data: bytes) -> list[str]:
+        if time.monotonic() > deadline:
+            raise _OverBudget
+        return recogniser(data)
+
+    async def fetch(url: str) -> Optional[bytes]:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise _OverBudget
+        async with gate:
+            try:
+                return await asyncio.wait_for(download(url), left)
+            except asyncio.TimeoutError:
+                raise _OverBudget from None
+
+    async def one(index: int, url: str) -> None:
+        work = None
         try:
-            data = await download(url)
-        except Exception as exc:  # noqa: BLE001 - one bad image is not the page
-            result.skipped[url] = f"download failed: {type(exc).__name__}"
-            continue
-        if not data:
-            result.skipped[url] = "download failed or image too large"
-            continue
+            try:
+                data = await fetch(url)
+            except _OverBudget:
+                skipped[url] = over
+                return
+            except Exception as exc:  # noqa: BLE001 - one bad image is not the page
+                skipped[url] = f"download failed: {type(exc).__name__}"
+                return
+            if not data:
+                skipped[url] = "download failed or image too large"
+                return
+            if index:
+                await handed[index - 1].wait()
+            work = loop.run_in_executor(pool, job, data)
+        finally:
+            handed[index].set()
         try:
-            result.texts[url] = await asyncio.to_thread(recogniser, data)
+            texts[url] = await work
+        except _OverBudget:
+            skipped[url] = over
         except Exception as exc:  # noqa: BLE001
             LOGGER.debug("OCR failed for %s: %s", url, exc)
-            result.skipped[url] = f"OCR failed: {type(exc).__name__}"
-    result.seconds = time.monotonic() - start
+            skipped[url] = f"OCR failed: {type(exc).__name__}"
+
+    await asyncio.gather(*(one(i, u) for i, u in enumerate(batch)))
+    for url in urls[cap:]:
+        skipped[url] = f"over the {cap}-image safety cap"
+    result = OcrResult(seconds=time.monotonic() - start)
+    result.texts = {u: texts[u] for u in urls if u in texts}
+    result.skipped = {u: skipped[u] for u in urls if u in skipped}
     return result

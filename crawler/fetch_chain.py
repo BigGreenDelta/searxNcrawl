@@ -267,7 +267,9 @@ def loading_shell(markdown: str) -> Optional[str]:
     if templates >= _SHELL_MIN_TEMPLATES:
         return f"unrendered templates ({templates} {{{{ }}}} expressions)"
     if len(markers) >= _SHELL_MIN_MARKERS:
-        return f"loading placeholders ({len(markers)} lines, {real} chars of other text)"
+        return (
+            f"loading placeholders ({len(markers)} lines, {real} chars of other text)"
+        )
     return None
 
 
@@ -688,16 +690,20 @@ async def fetch(
     timeout: int = 20,
     fresh: bool = False,
     wait: Optional[PageWait] = None,
+    ocr: bool = True,
 ) -> CrawledDocument:
     """Fetch ``url`` through the tiers until one returns a real page.
 
     ``wait`` tells the browser tiers what to wait for before capture; with an
     explicit ``wait_for`` or ``wait_ms`` the http tier is skipped, as it is
-    for hash routes (``#/...``), which only a browser renders.
+    for hash routes (``#/...``), which only a browser renders. ``ocr=False``
+    tells site routes that read text from images (AliExpress descriptions)
+    to skip it; such a page is cached apart from the OCR one.
     """
     cache = _get_cache()
+    variant = "no-ocr" if not ocr and _route_uses_ocr(url) else ""
     if not fresh:
-        cached = cache.get(url)
+        cached = cache.get(url, variant)
         if cached is not None:
             cached.metadata["from_cache"] = True
             return cached
@@ -710,9 +716,9 @@ async def fetch(
         order = [t for t in order if t == "firecrawl"]
         attempts.append("free tiers: PDF, download it and convert locally")
 
-    routed = await _run_route(url, order, timeout, attempts)
+    routed = await _run_route(url, order, timeout, attempts, ocr)
     if routed is not None:
-        cache.put(routed)
+        cache.put(routed, variant)
         return routed
 
     blocked_seen = False
@@ -887,13 +893,26 @@ async def fetch(
     )
 
 
+def _route_uses_ocr(url: str) -> bool:
+    from . import site_routes
+
+    found = site_routes.match(url)
+    return bool(found and found[0].uses_ocr)
+
+
 async def _run_route(
-    url: str, order: List[str], timeout: int, attempts: list[str]
+    url: str,
+    order: List[str],
+    timeout: int,
+    attempts: list[str],
+    ocr: bool = True,
 ) -> Optional[CrawledDocument]:
     """A site route's page for ``url``, or None to go on with the tiers.
 
     Routes load pages in the stealth browser, so they run only when the
-    stealth tier is in play. A failed route is noted in ``attempts``.
+    stealth tier is in play. A failed route is noted in ``attempts``. A
+    failed page the route marks ``final`` (a site's own anti-bot check on
+    this IP, which every other free tier meets too) is returned as it is.
     """
     from . import site_routes
 
@@ -904,10 +923,17 @@ async def _run_route(
     label = f"route {route.name}"
     start = time.monotonic()
     try:
-        doc = await route.run(target, timeout * 3)
+        doc = await route.run(target, timeout * 3, ocr)
     except Exception as exc:  # noqa: BLE001 - the tiers still get their go
         attempts.append(f"{label}: {type(exc).__name__}: {exc}"[:300])
         return None
+    if doc.status == "failed" and doc.metadata.get("final"):
+        attempts.append(f"{label}: {doc.error_message}")
+        doc.request_url = url
+        doc.metadata["tiers_tried"] = attempts + [
+            "other tiers: skipped, the route was blocked"
+        ]
+        return doc
     problem = _verdict(doc)
     if problem is not None:
         attempts.append(f"{label}: {problem}")
@@ -936,6 +962,7 @@ async def fetch_many(
     timeout: int = 20,
     fresh: bool = False,
     wait: Optional[PageWait] = None,
+    ocr: bool = True,
 ) -> List[CrawledDocument]:
     import asyncio
 
@@ -952,6 +979,7 @@ async def fetch_many(
                 timeout=timeout,
                 fresh=fresh,
                 **extra,
+                **({} if ocr else {"ocr": False}),
             )
 
     return list(await asyncio.gather(*(one(u) for u in urls)))

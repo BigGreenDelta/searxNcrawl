@@ -387,10 +387,13 @@ async def _fetch_with_spend_input(
     timeout: int,
     fresh: bool,
     wait: Optional[PageWait] = None,
+    ocr: bool = True,
 ):
     """crawl's fetch on 2026-07-28: ask via InputRequiredResult when needed."""
     answer = _spend_answer(ctx)
-    extra = {"wait": wait} if wait else {}
+    extra: dict = {"wait": wait} if wait else {}
+    if not ocr:
+        extra["ocr"] = False
     if answer is None:
         docs = await fetch_chain.fetch_many(
             urls,
@@ -456,6 +459,7 @@ async def crawl(
     fresh: bool = False,
     wait_for: Optional[str] = None,
     wait_ms: int = 0,
+    ocr: bool = True,
     ctx: Optional[Context] = None,
 ):
     """
@@ -473,6 +477,14 @@ async def crawl(
     15 s). A page that still shows only "Loading..." placeholders or
     unrendered {{ templates }} comes back as an incomplete page with the text
     attached, not as the page. Hash routes (#/...) are rendered in a browser.
+
+    AliExpress item pages (/item/<id>.html) come back as a product sheet:
+    price, rating, orders, store, UK shipping, every option group with its
+    images, every SKU combination with price, sale price, currency (GBP) and
+    stock, the specifications and the full description. Text in the
+    description images is read by OCR and shown under each image, marked
+    OCR (ocr=false skips it). An AliExpress slider CAPTCHA returns
+    "blocked by AliExpress anti-bot"; do not retry it right away.
 
     Args:
         urls: List of URLs to fetch (required). Accepts a single URL or multiple URLs.
@@ -492,6 +504,8 @@ async def crawl(
             capture; skips the http tier. Bounded by the settle cap.
         wait_ms: Minimum wait in milliseconds before capture, 0-30000
             (default: 0); skips the http tier when set
+        ocr: Read text from images where a site route supports it (AliExpress
+            description images; default: true). Adds a few seconds per image.
 
     Returns:
         Fetched content in the specified format.
@@ -532,7 +546,13 @@ async def crawl(
 
     if auth is None and _modern(ctx):
         result = await _fetch_with_spend_input(
-            ctx, urls, concurrency=concurrency, timeout=timeout, fresh=fresh, wait=wait
+            ctx,
+            urls,
+            concurrency=concurrency,
+            timeout=timeout,
+            fresh=fresh,
+            wait=wait,
+            ocr=ocr,
         )
         if isinstance(result, mcp_types.InputRequiredResult):
             LOGGER.info("Asking the user before Firecrawl spends credits")
@@ -546,6 +566,7 @@ async def crawl(
             timeout=timeout,
             fresh=fresh,
             **({"wait": wait} if wait else {}),
+            **({} if ocr else {"ocr": False}),
         )
     elif len(urls) == 1:
         try:

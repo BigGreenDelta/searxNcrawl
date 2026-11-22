@@ -110,15 +110,43 @@ def recognise(data: bytes) -> list[str]:
     with _run_lock:
         for part in _slices(image):
             result, _ = engine(part)
-            for _box, text, score in result or []:
-                text = str(text).strip()
-                if not text or float(score) < MIN_SCORE:
-                    continue
+            for text in rows(result or []):
                 # The slice overlap can read the line on a cut twice.
                 if text in lines[-4:]:
                     continue
                 lines.append(text)
     return lines
+
+
+def rows(result: list) -> list[str]:
+    """RapidOCR boxes as text rows: boxes side by side join, left to right.
+
+    Spec sheets in images are tables ("Size:" ... "2.10 inch"); the
+    recogniser returns each cell on its own, which reads as a jumble.
+    """
+    boxes = []
+    for box, text, score in result:
+        text = str(text).strip()
+        if not text or float(score) < MIN_SCORE:
+            continue
+        ys = [float(p[1]) for p in box]
+        xs = [float(p[0]) for p in box]
+        boxes.append((min(ys), max(ys), min(xs), text))
+    boxes.sort(key=lambda b: (b[0] + b[1]) / 2)
+    out: list[list[tuple]] = []
+    for box in boxes:
+        top, bottom = box[0], box[1]
+        centre = (top + bottom) / 2
+        if out:
+            row = out[-1]
+            r_top = sum(b[0] for b in row) / len(row)
+            r_bottom = sum(b[1] for b in row) / len(row)
+            # Same row: the centre lies inside the row's band.
+            if r_top <= centre <= r_bottom:
+                row.append(box)
+                continue
+        out.append([box])
+    return [" ".join(b[3] for b in sorted(row, key=lambda b: b[2])) for row in out]
 
 
 @dataclass

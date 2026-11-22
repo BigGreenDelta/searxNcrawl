@@ -188,7 +188,7 @@ def chain(monkeypatch: pytest.MonkeyPatch):
 
         return run
 
-    async def route_run(url, timeout):
+    async def route_run(url, timeout, ocr=True):
         calls.append(f"route:{url}")
         outcome = script["route"]
         if isinstance(outcome, Exception):

@@ -1,0 +1,152 @@
+{
+ "pdp": {
+  "api": "mtop.aliexpress.pdp.pc.query",
+  "ret": [
+   "SUCCESS::调用成功"
+  ],
+  "v": "1.0",
+  "data": {
+   "result": {
+    "SKU": {
+     "skuProperties": [],
+     "skuPaths": [
+      {
+       "path": "",
+       "salable": true,
+       "skuId": 12000058709028248,
+       "skuIdStr": "12000058709028248",
+       "skuStock": 225
+      }
+     ]
+    },
+    "PRICE": {
+     "productId": 1005012556272268,
+     "skuIdStrPriceInfoMap": {
+      "12000058709028248": {
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡12.04",
+        "value": 12.04
+       },
+       "priceFontColor": "#EB281F",
+       "salePriceLocal": "￡4.89|4|89",
+       "salePriceString": "￡4.89"
+      }
+     },
+     "targetSkuPriceInfo": {
+      "originalPrice": {
+       "currency": "GBP",
+       "formatedAmount": "￡12.04",
+       "value": 12.04
+      },
+      "priceFontColor": "#EB281F",
+      "salePriceLocal": "￡4.89|4|89",
+      "salePriceString": "￡4.89"
+     }
+    },
+    "PRODUCT_TITLE": {
+     "text": "2.1-Inch TFT LCD Screen GC9B72 Small-Screen 360x360 Display LCD Color Screen SPI Round Screen"
+    },
+    "GLOBAL_DATA": {
+     "globalData": {
+      "subject": "2.1-Inch TFT LCD Screen GC9B72 Small-Screen 360x360 Display LCD Color Screen SPI Round Screen"
+     }
+    },
+    "PC_RATING": {
+     "rating": "4.5",
+     "totalValidNum": 144,
+     "otherText": "2,000+ sold"
+    },
+    "SHOP_CARD_PC": {
+     "storeName": "Estardyn Flagship Store",
+     "benefitInfoList": [
+      {
+       "title": "# sold in 180 days ",
+       "value": "10,000+"
+      },
+      {
+       "title": "positive reviews",
+       "value": "96.6%"
+      }
+     ],
+     "sellerInfo": {
+      "storeNum": 1104118155,
+      "storeURL": "//www.aliexpress.com/store/1104118155",
+      "formatOpenTime": "Sep 4, 2024",
+      "countryCompleteName": "China"
+     }
+    },
+    "PRODUCT_PROP_PC": {
+     "showedProps": [
+      {
+       "attrName": "High-concerned chemical",
+       "attrValue": "None"
+      },
+      {
+       "attrName": "Display Mode",
+       "attrValue": "360*360"
+      },
+      {
+       "attrName": "is_customized",
+       "attrValue": "Yes"
+      },
+      {
+       "attrName": "Model Number",
+       "attrValue": "2.10 TFT"
+      },
+      {
+       "attrName": "Type",
+       "attrValue": "TFT"
+      },
+      {
+       "attrName": "Brand Name",
+       "attrValue": "Estardyn"
+      },
+      {
+       "attrName": "Origin",
+       "attrValue": "Mainland China"
+      },
+      {
+       "attrName": "Resolution",
+       "attrValue": "320x320"
+      }
+     ]
+    },
+    "HEADER_IMAGE_PC": {
+     "imagePathList": [
+      "https://ae-pic-a1.aliexpress-media.com/kf/S5a323c8046ce497d99884c7c54e5093du.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/S4cc8f0c0e24f4af99eb4ff58f9e751dcM.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/S2fc406d0ca1e4a9292ea69068950c945Z.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/S53111d0a8b2b437a93af06e6a7217a219.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/S716d51f4fbf642f183b5a1cecc8a70ecq.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/Sd931604616ae4aa699a5fc2001deae69I.jpg"
+     ]
+    },
+    "DESC": {
+     "pcDescUrl": "https://pdp.aliexpress-media.com/product/description/pc/v2/en_US/desc.htm?productId=1005012556272268&key=S78f68604c14c454d946a30511a33b215d.zip&token=800766f3864d85f1de72843f75c46437&sellerId=6000806650"
+    },
+    "SHIPPING": {
+     "deliveryLayoutInfo": [
+      {
+       "bizData": {
+        "deliveryProviderName": "Aliexpress Selection Premium shipping",
+        "company": "AliExpress Selection Premium shipping",
+        "shippingFee": "charge",
+        "displayAmount": 1.99,
+        "displayCurrency": "GBP",
+        "logisticsComposeThreshold": "￡8.00",
+        "displayEtaMinDate": "Nov. 28",
+        "displayEtaMaxDate": "Dec. 01",
+        "deliveryDayMin": 6,
+        "deliveryDayMax": 9,
+        "shipFrom": "China",
+        "shipToCode": "UK"
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "desc": "<p><img src=\"https://ae-pic-a1.aliexpress-media.com/kf/S4534cd5612e94ddc98c6744f06b6500dO.jpg\" slate-data-type=\"image\"/><img src=\"https://ae-pic-a1.aliexpress-media.com/kf/S4aa3936b85b24738b0a927bd3b732731P.jpg\" slate-data-type=\"image\"/></p><p><img src=\"https://ae-pic-a1.aliexpress-media.com/kf/S2fc406d0ca1e4a9292ea69068950c945Z.jpg\" slate-data-type=\"image\"/><img src=\"https://ae-pic-a1.aliexpress-media.com/kf/Sd931604616ae4aa699a5fc2001deae69I.jpg\" slate-data-type=\"image\"/><img src=\"https://ae-pic-a1.aliexpress-media.com/kf/S4cc8f0c0e24f4af99eb4ff58f9e751dcM.jpg\" slate-data-type=\"image\"/></p>\n<script>window.adminAccountId=6000806650;</script>\n"
+}

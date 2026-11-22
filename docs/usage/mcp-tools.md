@@ -1,6 +1,6 @@
 # MCP Tools
 
-<!-- Updated: 2026-10-28 -->
+<!-- Updated: 2026-11-22 -->
 
 ## `crawl`
 
@@ -10,6 +10,7 @@ Crawl one or more web pages and extract their content.
 - Unknown `output_format` values fall back to Markdown.
 - The browser tiers wait for script-loaded content before capture: the page text and its finished fetch/XHR requests must stay unchanged for 1.5 s (5 s while "Loading..."-style placeholders are visible), up to 15 s. A page that still shows only loading placeholders, unrendered `{{ template }}` expressions or a bare page shell after that comes back as a failed "incomplete page" with its text attached; it is not cached, and Firecrawl is not paid to wait longer for it.
 - Hash routes (`https://site/app#/results/X`) skip the `http` tier, are rendered in a browser and are cached under their own key.
+- AliExpress item pages (`/item/<id>.html`, tracking parameters dropped) come back as a product sheet built from the page's own item data request: title, price (UK region, GBP), rating, review count, orders, store, shipping to the UK, every option group with its option images, every SKU combination with price, sale price, discount, stock and SKU id, the specifications table and the seller's full description. Text in the description images is read by OCR on the server (RapidOCR, offline) and quoted under each image, marked OCR. At most `OCR_MAX_IMAGES` images (default 12) of up to `OCR_MAX_BYTES` (default 4 MB) are read per page, within `OCR_BUDGET_S` seconds (default 40); OCR text is cached per image for 30 days. When AliExpress answers with its slider CAPTCHA the result is a failed page "blocked by AliExpress anti-bot", and no other tier is tried.
 
 ### Parameters
 
@@ -25,6 +26,7 @@ Crawl one or more web pages and extract their content.
 | `fresh`        | `bool`      | `false`      | Ignore the cache and fetch again                    |
 | `wait_for`     | `str`       | `null`       | CSS selector to wait for, or `text:<text>` to wait for visible text; skips the `http` tier |
 | `wait_ms`      | `int`       | `0`          | Minimum wait before capture in ms (0-30000); skips the `http` tier when set |
+| `ocr`          | `bool`      | `true`       | Read text from images where a site route supports it (AliExpress description images); `false` skips it and is cached apart |
 
 ### Examples
 
@@ -50,6 +52,9 @@ crawl(urls=["https://slow-site.com"], timeout=60)
 # Wait for script-loaded results
 crawl(urls=["https://track.example/QP123GB"], wait_for="text:Delivered")
 crawl(urls=["https://shop.example/search?q=cable"], wait_for=".result-list li")
+
+# AliExpress item: variants, prices, description; skip OCR for speed
+crawl(urls=["https://www.aliexpress.com/item/1005012556272268.html"], ocr=False)
 ```
 
 ---

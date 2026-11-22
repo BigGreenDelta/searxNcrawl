@@ -8,6 +8,13 @@ Firecrawl tier.
 Environment:
     FETCH_CACHE_PATH: SQLite file (default ``~/.cache/searxncrawl/fetch.sqlite``)
     FETCH_CACHE_TTL: Seconds a cached page stays valid (default 86400; 0 disables)
+
+OCR text of images (``crawler.ocr``) is kept in the same file, by image URL,
+for 30 days: AliExpress image URLs name their content, so a fresh crawl of a
+page reads only the images it has not seen before.
+
+A page can be stored in variants of one URL (for example the same AliExpress
+item without OCR); ``variant`` keeps them apart.
 """
 
 from __future__ import annotations
@@ -37,6 +44,14 @@ CREATE TABLE IF NOT EXISTS pages (
     fetched_at REAL NOT NULL
 )
 """
+_OCR_SCHEMA = """
+CREATE TABLE IF NOT EXISTS ocr (
+    url TEXT PRIMARY KEY,
+    lines TEXT NOT NULL,
+    fetched_at REAL NOT NULL
+)
+"""
+OCR_TTL = 30 * 86400
 
 
 def cache_ttl() -> int:
@@ -90,16 +105,22 @@ class FetchCache:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(self.path, check_same_thread=False)
             self._conn.execute(_SCHEMA)
+            self._conn.execute(_OCR_SCHEMA)
         return self._conn
 
-    def get(self, url: str) -> Optional[CrawledDocument]:
+    @staticmethod
+    def key(url: str, variant: str = "") -> str:
+        key = normalize_url(url)
+        return f"{key} [{variant}]" if variant else key
+
+    def get(self, url: str, variant: str = "") -> Optional[CrawledDocument]:
         if not self.enabled:
             return None
         row = (
             self._db()
             .execute(
                 "SELECT final_url, markdown, metadata, fetched_at FROM pages WHERE url = ?",
-                (normalize_url(url),),
+                (self.key(url, variant),),
             )
             .fetchone()
         )
@@ -119,7 +140,7 @@ class FetchCache:
             metadata=meta,
         )
 
-    def put(self, doc: CrawledDocument) -> None:
+    def put(self, doc: CrawledDocument, variant: str = "") -> None:
         if not self.enabled or doc.status == "failed" or not doc.markdown:
             return
         meta = {k: v for k, v in doc.metadata.items() if k != "cache_age_seconds"}
@@ -127,11 +148,38 @@ class FetchCache:
         db.execute(
             "INSERT OR REPLACE INTO pages VALUES (?, ?, ?, ?, ?)",
             (
-                normalize_url(doc.request_url),
+                self.key(doc.request_url, variant),
                 doc.final_url,
                 doc.markdown,
                 json.dumps(meta, default=str),
                 time.time(),
             ),
+        )
+        db.commit()
+
+    def get_ocr(self, url: str) -> Optional[list[str]]:
+        """Cached OCR lines of an image, or None."""
+        if not self.enabled:
+            return None
+        row = (
+            self._db()
+            .execute("SELECT lines, fetched_at FROM ocr WHERE url = ?", (url,))
+            .fetchone()
+        )
+        if row is None or time.time() - row[1] > OCR_TTL:
+            return None
+        try:
+            lines = json.loads(row[0])
+        except ValueError:
+            return None
+        return [str(x) for x in lines] if isinstance(lines, list) else None
+
+    def put_ocr(self, url: str, lines: list[str]) -> None:
+        if not self.enabled:
+            return
+        db = self._db()
+        db.execute(
+            "INSERT OR REPLACE INTO ocr VALUES (?, ?, ?)",
+            (url, json.dumps(lines, ensure_ascii=False), time.time()),
         )
         db.commit()

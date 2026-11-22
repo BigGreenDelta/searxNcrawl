@@ -36,7 +36,10 @@ class Route:
     name: str
     # The canonical URL the route loads, or None when it does not apply.
     match: Callable[[str], Optional[str]]
-    run: Callable[[str, int], Awaitable[CrawledDocument]]
+    # run(url, timeout, ocr): ``ocr`` asks for text read from images.
+    run: Callable[[str, int, bool], Awaitable[CrawledDocument]]
+    # The route reads text from images, so ``ocr=False`` pages are cached apart.
+    uses_ocr: bool = False
 
 
 # --- Thingiverse ----------------------------------------------------------
@@ -239,7 +242,7 @@ def thingiverse_markdown(thing: dict, files: Optional[list], url: str) -> str:
 _THINGIVERSE_WAIT_MS = 12000
 
 
-async def _thingiverse_run(url: str, timeout: int) -> CrawledDocument:
+async def _thingiverse_run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
     from scrapling.fetchers import StealthyFetcher
 
     found = thing_id(url) or ""
@@ -324,8 +327,24 @@ async def _thingiverse_run(url: str, timeout: int) -> CrawledDocument:
     )
 
 
+# --- AliExpress -----------------------------------------------------------
+
+
+async def _aliexpress_run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
+    from . import aliexpress
+
+    return await aliexpress.run(url, timeout, ocr)
+
+
+def _aliexpress_match(url: str) -> Optional[str]:
+    from . import aliexpress
+
+    return aliexpress.canonical_url(url)
+
+
 ROUTES: tuple[Route, ...] = (
     Route("thingiverse", _thingiverse_match, _thingiverse_run),
+    Route("aliexpress", _aliexpress_match, _aliexpress_run, uses_ocr=True),
 )
 
 

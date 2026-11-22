@@ -1,0 +1,350 @@
+{
+ "pdp": {
+  "api": "mtop.aliexpress.pdp.pc.query",
+  "ret": [
+   "SUCCESS::调用成功"
+  ],
+  "v": "1.0",
+  "data": {
+   "result": {
+    "SKU": {
+     "skuProperties": [
+      {
+       "skuPropertyId": 200000182,
+       "skuPropertyName": "Color Name",
+       "skuPropertyValues": [
+        {
+         "propertyValueDisplayName": "Black (8 pcs)",
+         "propertyValueIdLong": 366,
+         "propertyValueName": "YELLOW",
+         "skuPropertyImagePath": "https://ae-pic-a1.aliexpress-media.com/kf/H8294e1a6b3624577b9ff996259f8e263B.jpg"
+        },
+        {
+         "propertyValueDisplayName": "Grey (8 pcs)",
+         "propertyValueIdLong": 193,
+         "propertyValueName": "black",
+         "skuPropertyImagePath": "https://ae-pic-a1.aliexpress-media.com/kf/S73ce302e6f1447eabce206e4c53bf909D.jpg"
+        },
+        {
+         "propertyValueDisplayName": "Yellow (8 pcs)",
+         "propertyValueIdLong": 29,
+         "propertyValueName": "WHITE",
+         "skuPropertyImagePath": "https://ae-pic-a1.aliexpress-media.com/kf/S644ff42a45e14134ada9438bec5321f1a.jpg"
+        },
+        {
+         "propertyValueDisplayName": "Blue (8 pcs)",
+         "propertyValueIdLong": 691,
+         "propertyValueName": "GRAY",
+         "skuPropertyImagePath": "https://ae-pic-a1.aliexpress-media.com/kf/S1083227af63f484c9e825228b9b316e1d.jpg"
+        },
+        {
+         "propertyValueDisplayName": "Red (8 pcs)",
+         "propertyValueIdLong": 10,
+         "propertyValueName": "Red",
+         "skuPropertyImagePath": "https://ae-pic-a1.aliexpress-media.com/kf/Sddfe882e1b14437f9b1542e021c88b14m.jpg"
+        },
+        {
+         "propertyValueDisplayName": "Pearl White (8 pcs)",
+         "propertyValueIdLong": 350852,
+         "propertyValueName": "Orange",
+         "skuPropertyImagePath": "https://ae-pic-a1.aliexpress-media.com/kf/H79131744349b4eedb58e7b164f8a857cR.jpg"
+        },
+        {
+         "propertyValueDisplayName": "Silver (8 pcs)",
+         "propertyValueIdLong": 350853,
+         "propertyValueName": "Silver",
+         "skuPropertyImagePath": "https://ae-pic-a1.aliexpress-media.com/kf/H6cb918fd5a3b490d958a3722a1f16fa2f.jpg"
+        }
+       ]
+      }
+     ],
+     "skuPaths": [
+      {
+       "path": "200000182:10",
+       "salable": true,
+       "skuId": 12000029381456860,
+       "skuIdStr": "12000029381456860",
+       "skuStock": 99
+      },
+      {
+       "path": "200000182:691",
+       "salable": true,
+       "skuId": 12000029381456860,
+       "skuIdStr": "12000029381456859",
+       "skuStock": 100
+      },
+      {
+       "path": "200000182:29",
+       "salable": true,
+       "skuId": 12000029381456858,
+       "skuIdStr": "12000029381456858",
+       "skuStock": 100
+      },
+      {
+       "path": "200000182:193",
+       "salable": true,
+       "skuId": 12000029381456856,
+       "skuIdStr": "12000029381456857",
+       "skuStock": 99
+      },
+      {
+       "path": "200000182:350853",
+       "salable": true,
+       "skuId": 12000026291225060,
+       "skuIdStr": "12000026291225060",
+       "skuStock": 99
+      },
+      {
+       "path": "200000182:366",
+       "salable": true,
+       "skuId": 12000026291225060,
+       "skuIdStr": "12000026291225059",
+       "skuStock": 97
+      },
+      {
+       "path": "200000182:350852",
+       "salable": true,
+       "skuId": 12000026291225058,
+       "skuIdStr": "12000026291225058",
+       "skuStock": 98
+      }
+     ]
+    },
+    "PRICE": {
+     "productId": 1005003561184819,
+     "skuIdStrPriceInfoMap": {
+      "12000026291225058": {
+       "discount": "20% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡160.49",
+        "value": 160.49
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡128.39|128|39",
+       "salePriceString": "￡128.39",
+       "sellerByLot": false
+      },
+      "12000029381456860": {
+       "discount": "20% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡160.49",
+        "value": 160.49
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡128.39|128|39",
+       "salePriceString": "￡128.39",
+       "sellerByLot": false
+      },
+      "12000026291225059": {
+       "discount": "20% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡160.49",
+        "value": 160.49
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡128.39|128|39",
+       "salePriceString": "￡128.39",
+       "sellerByLot": false
+      },
+      "12000026291225060": {
+       "discount": "20% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡160.49",
+        "value": 160.49
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡128.39|128|39",
+       "salePriceString": "￡128.39",
+       "sellerByLot": false
+      },
+      "12000029381456857": {
+       "discount": "20% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡160.49",
+        "value": 160.49
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡128.39|128|39",
+       "salePriceString": "￡128.39",
+       "sellerByLot": false
+      },
+      "12000029381456859": {
+       "discount": "20% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡160.49",
+        "value": 160.49
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡128.39|128|39",
+       "salePriceString": "￡128.39",
+       "sellerByLot": false
+      },
+      "12000029381456858": {
+       "discount": "20% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡160.49",
+        "value": 160.49
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡128.39|128|39",
+       "salePriceString": "￡128.39",
+       "sellerByLot": false
+      }
+     },
+     "targetSkuPriceInfo": {
+      "discount": "20% off",
+      "originalPrice": {
+       "currency": "GBP",
+       "formatedAmount": "￡160.49",
+       "value": 160.49
+      },
+      "priceFontColor": "#000000",
+      "salePriceLocal": "￡128.39|128|39",
+      "salePriceString": "￡128.39",
+      "sellerByLot": false
+     }
+    },
+    "PRODUCT_TITLE": {
+     "text": "ZJCGO OEM Original Sensors Car Parking Sensor Assistance Backup Radar Buzzer System For Lexus CT 200h CT200h ZWA10 2014~2020"
+    },
+    "GLOBAL_DATA": {
+     "globalData": {
+      "subject": "ZJCGO OEM Original Sensors Car Parking Sensor Assistance Backup Radar Buzzer System For Lexus CT 200h CT200h ZWA10 2014~2020"
+     }
+    },
+    "PC_RATING": {
+     "totalValidNum": 0,
+     "otherText": "1 sold"
+    },
+    "SHOP_CARD_PC": {
+     "storeName": "ZJCGO Exclusive Store",
+     "benefitInfoList": [
+      {
+       "title": "# sold in 180 days ",
+       "value": "100+"
+      },
+      {
+       "title": "positive reviews",
+       "value": "98.8%"
+      },
+      {
+       "title": "store rating",
+       "value": "4.8"
+      },
+      {
+       "title": "Communication",
+       "value": "4.9"
+      }
+     ],
+     "sellerInfo": {
+      "storeNum": 911941543,
+      "storeURL": "//www.aliexpress.com/store/911941543",
+      "formatOpenTime": "May 6, 2021",
+      "countryCompleteName": "China"
+     }
+    },
+    "PRODUCT_PROP_PC": {
+     "showedProps": [
+      {
+       "attrName": "IS It With PCB",
+       "attrValue": "Yes"
+      },
+      {
+       "attrName": "High-concerned chemical",
+       "attrValue": "None"
+      },
+      {
+       "attrName": "OSD Language",
+       "attrValue": "Chinese (Simplified),Chinese (Traditional),albanian,Arabic,Azeri,Irish,ESTONIAN,Belarusian,Bulgarian,Icelandic,Polish,PERSIAN,Boolean text (Dutch South Africa),Danish,German,Russian,French,Filipino,Finnish,Georgian,Haitian Creole,Korean,Dutch,Galicia,Catalan,czech,Croatian,Latin,Latvian,Lithuanian,Romanian,Maltese,Malay,Macedonian,Norwegian,Portuguese,Japanese,Swedish,Serbian,Slovak,Slovenian,Swahili,THAI,Turkish,Welsh,Ukrainian,Hebrew,Greek,Spain's Basque,Spanish,hungarian,Armenian,Italian,Yiddish,hindi,Urdu India,indonesia,English,Vietnamese,Russia"
+      },
+      {
+       "attrName": "Talk Range",
+       "attrValue": "2.0m-0.2m"
+      },
+      {
+       "attrName": "Model Name",
+       "attrValue": "CT200h"
+      },
+      {
+       "attrName": "Type",
+       "attrValue": "Invisible"
+      },
+      {
+       "attrName": "Brand Name",
+       "attrValue": "ZJCGO"
+      },
+      {
+       "attrName": "Origin",
+       "attrValue": "Mainland China"
+      },
+      {
+       "attrName": "Material",
+       "attrValue": "ABS"
+      },
+      {
+       "attrName": "Certification",
+       "attrValue": "CE"
+      }
+     ]
+    },
+    "HEADER_IMAGE_PC": {
+     "imagePathList": [
+      "https://ae-pic-a1.aliexpress-media.com/kf/Ha2b5caa02c594af1af4a0e9c5af6393f3.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/H804a0e40fd0c41609bbb0101a923f704D.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/H85ba6c57b2ca4f819781f0cea19f6248l.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/Hfc21e17c6fe14dd49d864a4cfdb640c1x.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/H9cb042c650c646858a5ec798779e4d3c3.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/S27b86957e9f746e78ead060e239ed561J.jpg"
+     ]
+    },
+    "DESC": {
+     "pcDescUrl": "https://pdp.aliexpress-media.com/product/description/pc/v2/en_US/desc.htm?productId=1005003561184819&key=S15b7862a1996416494af6d4f0909a37ax.zip&token=b2af4bc92f0006570669843f9257d41d&sellerId=231665212",
+     "instructionInfo": {
+      "title": "Item guides & documents",
+      "mediaUrl": "https://ae-pic-a1.aliexpress-media.com/kf/Sd983a819dab7406f90613c1a54459563a.pdf"
+     }
+    },
+    "SHIPPING": {
+     "deliveryLayoutInfo": [
+      {
+       "bizData": {
+        "deliveryProviderName": "AliExpress Standard Shipping",
+        "company": "AliExpress standard shipping",
+        "shippingFee": "free",
+        "displayEtaMinDate": "Dec. 04",
+        "displayEtaMaxDate": "Dec. 09",
+        "deliveryDayMin": 12,
+        "deliveryDayMax": 17,
+        "shipFrom": "China",
+        "shipToCode": "UK"
+       }
+      },
+      {
+       "bizData": {
+        "deliveryProviderName": "AliExpress Premium Shipping",
+        "company": "AliExpress Premium shipping",
+        "shippingFee": "charge",
+        "displayAmount": 36.85,
+        "displayCurrency": "GBP",
+        "displayEtaMinDate": "Nov. 28",
+        "displayEtaMaxDate": "Dec. 03",
+        "deliveryDayMin": 6,
+        "deliveryDayMax": 11,
+        "shipFrom": "China",
+        "shipToCode": "UK"
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "desc": "<div class=\"detailmodule_text\"><p style=\"font-family:OpenSans;font-size:20px;font-weight:900;line-height:28px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-title\">Optional custom colors:</p><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">Such as 4 black and 4 white or 2 black and 6 white</p></div><div class=\"detailmodule_text\"><p style=\"font-family:OpenSans;font-size:20px;font-weight:900;line-height:28px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-title\">Applicable models:</p><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">for Lexus CT 200h ZWA10 2014~2020</p></div><div class=\"detailmodule_text\"><p style=\"font-family:OpenSans;font-size:20px;font-weight:900;line-height:28px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-title\">Note:</p><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">The main function of the reversing radar is to use the ultrasonic principle to send ultrasonic waves from the probe installed on the rear of the car or the bumper of the front of the car to reflect the sound wave probe when reversing, so as to calculate the actual distance between the car body and the obstacle.</p></div><div class=\"detailmodule_text\"><p style=\"font-family:OpenSans;font-size:20px;font-weight:900;line-height:28px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-title\">Specification:</p><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">Function: Regional warning<br/>After-sales service: one year<br/>Alarm volume: 70dB (inclusive) -90dB (inclusive)<br/>Working temperature range: -20℃-80℃<br/>Test distance: 0.2m-0.8m<br/>Display type: Original screen or original dashboard<br/>Number of probes: 4/8<br/>Voice function: visual reversing<br/>Whether to disassemble the bumper: Yes</p></div><div class=\"detailmodule_text-image\"><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/H49052881399741e49d46156b16f02891b.jpg\" slate-data-type=\"image\"/><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/H8202c615c7c14381a89af332f03c9dc7n.jpg\" slate-data-type=\"image\"/></div><div class=\"detailmodule_text-image\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">Host sound speaker reminder<br/>When the car is close to an object, it will make a sound to remind you</p></div><div class=\"detailmodule_image\"><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/H399d8031e025404d83ad5568d973ad0a0.jpg\" slate-data-type=\"image\"/></div><div class=\"detailmodule_text\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">The sound prompts that the darker the color, the closer the distance<br/>Object distance radar 50CM-30GM<br/>Radar display yellow <br/>Object distance radar 30CM-OCM<br/>Radar shows red<br/><br/>Area detection digital radar<br/>Radar detection is divided into three areas on the left, right and middle More detailed display of the obstacle position,70CM from the object enters yellow, 50CM enters orange, and 30CM enters red</p></div><div class=\"detailmodule_image\"><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/H2af272b88fba406d8908b20a51c33ac9U.jpg\" slate-data-type=\"image\"/></div><div class=\"detailmodule_text\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">Not affected by the environment<br/>Good waterproof performance<br/>Rain does not affect the use<br/>High temperature resistance without false alarm</p></div><div class=\"detailmodule_image\"><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Hcb67c297286b4de0b489b90c9bd16d95x.jpg\" slate-data-type=\"image\"/></div><div class=\"detailmodule_text\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">Original car micro-hole non-destructive installation<br/>The original car reserved holes for installation to improve the driving safety factor of the car<br/>(Some models are not reserved)<br/><br/>Hole position is smooth and without burrs Professional sleek punch artifact<br/>The holes are smooth and beautiful without burrs</p></div><div class=\"detailmodule_image\"><img style=\"margin-bottom:10px\" class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Hb2a11c9cac3e49cbbc9848a29edb1aa1N.jpg\" slate-data-type=\"image\"/></div><div class=\"detailmodule_text\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">In D file<br/>Front radar starts automatically<br/>In D gear, the first 4 radars are automatically activated and displayed on the dashboard of the original car. When the vehicle speed exceeds 15KM/H, the radar will automatically turn off</p></div><div class=\"detailmodule_image\"><img style=\"margin-bottom:10px\" class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/H7e05ed82a6c841caadabbee6709ed126g.jpg\" slate-data-type=\"image\"/></div><div class=\"detailmodule_text\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">When R gear<br/>Automatic start of front and rear radar<br/>When in R gear, 4 radars on the left and right of the front bumper, and 4 radars on the rear bumper are automatically activated. When an obstacle is detected by the radar, an alarm will sound、</p></div><div class=\"detailmodule_text-image\"><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Haf7d38b9f1ed4ffdbd065454ced45844t.jpg\" slate-data-type=\"image\"/></div><div class=\"detailmodule_text-image\"><p style=\"font-family:OpenSans;font-size:20px;font-weight:900;line-height:28px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-title\">Effect after installation</p><div><img style=\"margin-bottom:10px\" class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/H804a0e40fd0c41609bbb0101a923f704D.jpg\" slate-data-type=\"image\"/><img style=\"margin-bottom:10px\" class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/H85ba6c57b2ca4f819781f0cea19f6248l.jpg\" slate-data-type=\"image\"/><img style=\"margin-bottom:10px\" class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Hfc21e17c6fe14dd49d864a4cfdb640c1x.jpg\" slate-data-type=\"image\"/></div></div><div class=\"detailmodule_text-image\"><p style=\"font-family:OpenSans;font-size:20px;font-weight:900;line-height:28px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-title\">Product configuration list</p><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">Different models have different configurations<br/>1. Host<br/>2. wiring harness<br/>3. Special radar probe<br/>4 Hole opener<br/>5 .Adhesion promoter<br/>6 speakers<br/>7.Radar switch button</p><div><img style=\"margin-bottom:10px\" class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/S27b86957e9f746e78ead060e239ed561J.jpg\" slate-data-type=\"image\"/></div></div><div class=\"detailmodule_text-image\"><p style=\"font-family:OpenSans;font-size:20px;font-weight:900;line-height:28px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-title\">Installation steps：</p><div><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Hd4e013ba3d0a475aa7e76ee469fda58ez.jpg\" slate-data-type=\"image\"/></div></div><div class=\"detailmodule_text-image\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">1. Whether the car has reserved holes, the front and rear<br/>bumpers can be removed directly if there are reserved holes.<br/>2. If there is no reserved hole, it is necessary to measure the hole<br/>distance according to the model, and make the hole position.</p><div><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/H27cc05ae38ff47e5abde18fde506413dz.jpg\" slate-data-type=\"image\"/></div></div><div class=\"detailmodule_text\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">3 Punch a hole in the center of the reserved hole,<br/>or punch a hole at the measurement position.<br/>4. Use the provided hole opener to polish it smoothly</p></div><div class=\"detailmodule_image\"><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Hbc34046503494cd1b09884e44e0eec07m.jpg\" slate-data-type=\"image\"/></div><div class=\"detailmodule_text-image\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">5. Fix the probe.<br/>6. Connect the probe socket, arrange the wires,<br/>and restore the bumper.</p><div><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/H66693a6a39d14730a4fff0b7c3542b6ev.jpg\" slate-data-type=\"image\"/></div></div><div class=\"detailmodule_text-image\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">7. The rear bumper is treated the same,<br/>and the radar probe is installed.<br/>8. Pull the harness</p><div><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Hab4b26c0bacd4071982baad5f30049a6b.jpg\" slate-data-type=\"image\"/></div></div><div class=\"detailmodule_text-image\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">9 Pull up the door frame rubber strip and the door sll,<br/>prepare to hide the wiring hamess on the left.<br/>10. Lay the line and restore the bumper</p><div><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/H32ab7bf0ba114b399777653b4113329as.jpg\" slate-data-type=\"image\"/></div></div><div class=\"detailmodule_text-image\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">11. Connect the radar host<br/>12. Insert the reserved plug of the original car</p><div><img class=\"detail-desc-decorate-image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/H016e9e1efd094d5583f66cd55578ee377.jpg\" slate-data-type=\"image\"/></div></div><div class=\"detailmodule_text\"><p style=\"font-family:OpenSans;font-size:14px;font-weight:300;line-height:20px;white-space:pre-wrap;color:rgb(0, 0, 0);margin-bottom:12px\" class=\"detail-desc-decorate-content\">13. Restore the wiring harness and detect the radar function<br/><br/>After receiving the radar, you can first test whether the radar is sensitive or not, it does not rule out that it will be damaged during transportation.<br/>During the installation, the bumper can not be restored first, and it can be tested after being installed on the car. <br/>When the bumper is restored, it can avoid repeated disassembly of the bumper.</p></div><p><br/></p>\n<script>window.adminAccountId=231665212;</script>\n"
+}

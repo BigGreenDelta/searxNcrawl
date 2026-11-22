@@ -71,7 +71,13 @@ def test_recognise_real_image():
     np = pytest.importorskip("numpy")
     image = np.full((200, 900, 3), 255, np.uint8)
     cv2.putText(
-        image, "Material: ABS plastic", (20, 110), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (0, 0, 0), 3
+        image,
+        "Material: ABS plastic",
+        (20, 110),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.6,
+        (0, 0, 0),
+        3,
     )
     ok, buf = cv2.imencode(".png", image)
     assert ok

@@ -150,6 +150,18 @@ def test_sensor_has_one_group_and_free_shipping():
     assert item["reviews"] == 0
 
 
+def test_zero_free_shipping_threshold_is_hidden():
+    result = ae.pdp_result(_fixture(SCREEN)["pdp"])
+    result["SHIPPING"]["deliveryLayoutInfo"][0]["bizData"][
+        "logisticsComposeThreshold"
+    ] = "￡0.00"
+    item = ae.item_data(result, SCREEN)
+    assert item["shipping"][0]["free_over"] == ""
+    md = ae.item_markdown(item, "https://www.aliexpress.com/item/x.html")
+    assert "free over" not in md
+    assert "Aliexpress Selection Premium shipping: £1.99, delivery" in md
+
+
 def test_screen_without_options():
     item = _item(SCREEN)
     assert item["option_groups"] == []

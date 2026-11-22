@@ -200,7 +200,9 @@ async def test_full_coverage_http_text_stays(tiers):
 
 async def test_big_page_with_real_text_is_not_a_shell(tiers):
     calls, script = tiers
-    script["http"] = (_doc("https://a.test", "word " * 5000, "http"), SHELL_HTML)
+    # 200 KB of scripts, but the body shows the text that was extracted.
+    html = SHELL_HTML.replace("<h1>Search</h1>", "<p>" + "word " * 5000 + "</p>")
+    script["http"] = (_doc("https://a.test", "word " * 5000, "http"), html)
     await fetch_chain.fetch("https://a.test")
     assert calls == ["http"]
 

@@ -14,10 +14,15 @@
 A tier's result is accepted when it is not a challenge page and has at least
 ``FETCH_MIN_CHARS`` characters of Markdown. Successful results are cached.
 
+Site routes (``site_routes``) go first for the URLs they know, such as
+Thingiverse thing pages. A route that fails hands over to the tiers.
+
 An http result that is a script shell (a big HTML document whose readable text
 is a tiny fraction of it, like a store search page that loads its listings with
-JavaScript), or whose extracted text is a small share of the text the page
-shows (a category page reduced to its intro paragraph), is kept only as a
+JavaScript), whose body shows no text at all (an app root that only scripts
+fill, the text coming from JSON-LD and meta tags), or whose extracted text is
+a small share of the text the page shows (a category page reduced to its
+intro paragraph), is kept only as a
 fallback: the browser tier gets a go, and stealth too if the browser comes
 back thin. If nothing beats it, it is returned with a warning.
 
@@ -281,11 +286,51 @@ def rendered_shell(doc: CrawledDocument, html: str) -> Optional[str]:
     return None
 
 
+# A page body that shows less text than this has not rendered its content.
+_EMPTY_BODY_CHARS = 200
+
+
+def _body_chars(html: str) -> Optional[int]:
+    """Visible text in ``<body>``, or None when the HTML has no body."""
+    import lxml.html
+
+    try:
+        tree = lxml.html.fromstring(html)
+    except Exception:
+        return None
+    bodies = tree.xpath("//body")
+    if not bodies:
+        return None
+    body = bodies[0]
+    for node in body.xpath(".//script|.//style|.//noscript|.//template|.//svg"):
+        node.drop_tree()
+    return len(" ".join(body.text_content().split()))
+
+
+def metadata_only(doc: CrawledDocument, html: str) -> Optional[str]:
+    """Why an http page's text looks like it came only from its metadata.
+
+    A JavaScript app (Thingiverse thing pages, Next.js and React sites) can
+    serve an empty app root next to JSON-LD and meta tags. Text extraction
+    then builds a page from the description in those tags and passes the
+    length check, while everything the app renders is missing.
+    """
+    if not html:
+        return None
+    shown = _body_chars(html)
+    if shown is None or shown >= _EMPTY_BODY_CHARS:
+        return None
+    return (
+        f"empty app root ({shown} chars shown in <body>, text only from page metadata)"
+    )
+
+
 def needs_browser(doc: CrawledDocument, html: str) -> Optional[str]:
     """Why an accepted http page should still be rendered, or None."""
     return (
         loading_shell(doc.markdown or "")
         or script_shell(doc, html)
+        or metadata_only(doc, html)
         or partial_extraction(doc, html)
     )
 
@@ -665,6 +710,11 @@ async def fetch(
         order = [t for t in order if t == "firecrawl"]
         attempts.append("free tiers: PDF, download it and convert locally")
 
+    routed = await _run_route(url, order, timeout, attempts)
+    if routed is not None:
+        cache.put(routed)
+        return routed
+
     blocked_seen = False
     # Why the http text looked partial (script shell, low coverage), if it did.
     partial: Optional[str] = None
@@ -835,6 +885,37 @@ async def fetch(
         error_message="; ".join(attempts) or "no fetch tier configured",
         metadata={"tiers_tried": attempts},
     )
+
+
+async def _run_route(
+    url: str, order: List[str], timeout: int, attempts: list[str]
+) -> Optional[CrawledDocument]:
+    """A site route's page for ``url``, or None to go on with the tiers.
+
+    Routes load pages in the stealth browser, so they run only when the
+    stealth tier is in play. A failed route is noted in ``attempts``.
+    """
+    from . import site_routes
+
+    found = site_routes.match(url)
+    if found is None or "stealth" not in order:
+        return None
+    route, target = found
+    label = f"route {route.name}"
+    start = time.monotonic()
+    try:
+        doc = await route.run(target, timeout * 3)
+    except Exception as exc:  # noqa: BLE001 - the tiers still get their go
+        attempts.append(f"{label}: {type(exc).__name__}: {exc}"[:300])
+        return None
+    problem = _verdict(doc)
+    if problem is not None:
+        attempts.append(f"{label}: {problem}")
+        return None
+    LOGGER.info("Fetched %s via %s in %.1fs", url, label, time.monotonic() - start)
+    doc.request_url = url
+    doc.metadata["tiers_tried"] = attempts + [f"{label}: ok"]
+    return doc
 
 
 def _tier_timeout(tier: str, timeout: int, wait: Optional[PageWait]) -> int:

@@ -234,6 +234,7 @@ def _shipping(result: dict) -> list[dict]:
         if not isinstance(biz, dict):
             continue
         free = biz.get("shippingFee") == "free"
+        threshold = str(biz.get("logisticsComposeThreshold") or "").replace("￡", "£")
         out.append(
             {
                 "method": str(
@@ -241,9 +242,8 @@ def _shipping(result: dict) -> list[dict]:
                 ),
                 "fee": 0.0 if free else _num(biz.get("displayAmount")),
                 "currency": str(biz.get("displayCurrency") or ""),
-                "free_over": str(biz.get("logisticsComposeThreshold") or "").replace(
-                    "￡", "£"
-                ),
+                # "￡0.00" means there is no free-shipping threshold.
+                "free_over": threshold if _num(threshold) else "",
                 "eta": " - ".join(
                     d
                     for d in (
@@ -572,7 +572,8 @@ async def _ocr(urls: list[str]) -> tuple[dict, dict, float]:
     for url in urls[: ocr.max_images()]:
         hit = cache.get_ocr(url)
         if hit is not None:
-            texts[url] = hit
+            # Lines cached before the noise filter existed get it now.
+            texts[url] = ocr.clean(hit)
         else:
             todo.append(url)
     result = await ocr.read_images(

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ MIN_SCORE = 0.6
 # down (very tall description banners are cut into slices of this height).
 _MAX_SIDE = 1600
 
+_WORD = re.compile(r"\w")
 _engine: Any = None
 _engine_lock = threading.Lock()
 _run_lock = threading.Lock()
@@ -146,7 +148,16 @@ def rows(result: list) -> list[str]:
                 row.append(box)
                 continue
         out.append([box])
-    return [" ".join(b[3] for b in sorted(row, key=lambda b: b[2])) for row in out]
+    lines = [" ".join(b[3] for b in sorted(row, key=lambda b: b[2])) for row in out]
+    return clean(lines)
+
+
+def clean(lines: list[str]) -> list[str]:
+    """Drop stray marks that product photos give ("+", ".", one CJK character).
+
+    A line needs two letters or digits to count as text.
+    """
+    return [line for line in lines if len(_WORD.findall(line)) >= 2]
 
 
 @dataclass

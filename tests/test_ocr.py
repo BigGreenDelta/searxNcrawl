@@ -101,8 +101,11 @@ def test_rows_join_boxes_side_by_side():
         [box(10, 60), "Driver IC:", 0.97],
         [box(300, 58), "GC9B72", 0.96],
         [box(10, 110), "noise", 0.2],
+        [box(10, 160), "十", 0.99],
+        [box(10, 210), "+ .", 0.99],
+        [box(10, 260), "100x", 0.99],
     ]
-    assert ocr.rows(result) == ["Size: 2.10 inch", "Driver IC: GC9B72"]
+    assert ocr.rows(result) == ["Size: 2.10 inch", "Driver IC: GC9B72", "100x"]
 
 
 def test_ocr_cache_round_trip(tmp_path):
@@ -120,3 +123,11 @@ def test_ocr_cache_round_trip(tmp_path):
     off = FetchCache(path=tmp_path / "d.sqlite", ttl=0)
     off.put_ocr("https://img/1.jpg", ["x"])
     assert off.get_ocr("https://img/1.jpg") is None
+
+
+def test_clean_drops_stray_marks():
+    assert ocr.clean(["十", "+", ".", "X", "10pcs", "产品参数", "NO Electricity"]) == [
+        "10pcs",
+        "产品参数",
+        "NO Electricity",
+    ]

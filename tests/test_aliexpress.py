@@ -323,7 +323,7 @@ async def test_run_builds_the_page(offline):
     urls = offline["ocr_calls"][0]
     assert "## Description images (5)" in doc.markdown
     assert "3 not read by OCR here" in doc.markdown
-    assert f"1. {urls[0]} - OCR read: 1 lines" in doc.markdown
+    assert f"1. {urls[0]} - OCR read: 1 line" in doc.markdown
     assert f"5. {urls[4]} - OCR skipped: over the 15 s OCR time budget" in doc.markdown
     assert [i["url"] for i in doc.metadata["page_images"]] == urls
     assert doc.metadata["page_images"][0]["label"] == "description image 1"

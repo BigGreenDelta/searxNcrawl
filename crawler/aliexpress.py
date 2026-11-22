@@ -609,7 +609,7 @@ def image_status(
         if not ocr_on:
             status, note = "not read", "OCR off for this crawl"
         elif lines:
-            status, note = "read", f"{len(lines)} lines"
+            status, note = "read", f"{len(lines)} line{'s' if len(lines) != 1 else ''}"
         elif url in texts:
             status, note = "read", "no text found"
         else:

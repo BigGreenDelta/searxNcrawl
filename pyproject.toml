@@ -13,6 +13,7 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "scrapling[fetchers]>=0.5.1",
     "trafilatura>=2.3.1",
+    "rapidocr-onnxruntime>=1.4.4",
 ]
 license = "MIT"
 authors = [{ name = "DDM – Das Digitale Momentum GmbH & Co KG" }]

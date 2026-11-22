@@ -1,0 +1,378 @@
+{
+ "pdp": {
+  "api": "mtop.aliexpress.pdp.pc.query",
+  "ret": [
+   "SUCCESS::调用成功"
+  ],
+  "v": "1.0",
+  "data": {
+   "result": {
+    "SKU": {
+     "skuProperties": [
+      {
+       "skuPropertyId": 14,
+       "skuPropertyName": "Color",
+       "skuPropertyValues": [
+        {
+         "propertyValueDisplayName": "10PCS",
+         "propertyValueIdLong": 29,
+         "propertyValueName": "WHITE",
+         "skuPropertyImagePath": "https://ae-pic-a1.aliexpress-media.com/kf/S73db1dd8f21d48dc95bfbdec1ddce466D.jpg"
+        },
+        {
+         "propertyValueDisplayName": "30PCS",
+         "propertyValueIdLong": 193,
+         "propertyValueName": "black",
+         "skuPropertyImagePath": "https://ae-pic-a1.aliexpress-media.com/kf/Se8a13b00ea1f4dbf8d528cd9b94fdf60w.jpg"
+        }
+       ]
+      },
+      {
+       "skuPropertyId": 200000226,
+       "skuPropertyName": "Gem Color",
+       "skuPropertyValues": [
+        {
+         "propertyValueDisplayName": "10PCS",
+         "propertyValueIdLong": 29,
+         "propertyValueName": "WHITE",
+         "skuPropertyImagePath": ""
+        },
+        {
+         "propertyValueDisplayName": "30PCS",
+         "propertyValueIdLong": 193,
+         "propertyValueName": "black",
+         "skuPropertyImagePath": ""
+        },
+        {
+         "propertyValueDisplayName": "50PCS",
+         "propertyValueIdLong": 175,
+         "propertyValueName": "green",
+         "skuPropertyImagePath": ""
+        },
+        {
+         "propertyValueDisplayName": "100PCS",
+         "propertyValueIdLong": 10,
+         "propertyValueName": "Red",
+         "skuPropertyImagePath": ""
+        }
+       ]
+      }
+     ],
+     "skuPaths": [
+      {
+       "path": "200000226:193;14:193",
+       "salable": true,
+       "skuId": 12000061097254428,
+       "skuIdStr": "12000061097254427",
+       "skuStock": 9991
+      },
+      {
+       "path": "200000226:29;14:193",
+       "salable": true,
+       "skuId": 12000061097254426,
+       "skuIdStr": "12000061097254426",
+       "skuStock": 9988
+      },
+      {
+       "path": "200000226:10;14:29",
+       "salable": true,
+       "skuId": 12000061097254424,
+       "skuIdStr": "12000061097254425",
+       "skuStock": 9915
+      },
+      {
+       "path": "200000226:175;14:29",
+       "salable": true,
+       "skuId": 12000061097254424,
+       "skuIdStr": "12000061097254424",
+       "skuStock": 9980
+      },
+      {
+       "path": "200000226:10;14:193",
+       "salable": true,
+       "skuId": 12000061097254428,
+       "skuIdStr": "12000061097254429",
+       "skuStock": 9961
+      },
+      {
+       "path": "200000226:175;14:193",
+       "salable": true,
+       "skuId": 12000061097254428,
+       "skuIdStr": "12000061097254428",
+       "skuStock": 9986
+      },
+      {
+       "path": "200000226:193;14:29",
+       "salable": true,
+       "skuId": 12000061097254424,
+       "skuIdStr": "12000061097254423",
+       "skuStock": 9984
+      },
+      {
+       "path": "200000226:29;14:29",
+       "salable": true,
+       "skuId": 12000061097254422,
+       "skuIdStr": "12000061097254422",
+       "skuStock": 9987
+      }
+     ]
+    },
+    "PRICE": {
+     "productId": 1005013417484054,
+     "skuIdStrPriceInfoMap": {
+      "12000061097254428": {
+       "discount": "8% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡4.79",
+        "value": 4.79
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡4.38|4|38",
+       "salePriceString": "￡4.38",
+       "sellerByLot": false
+      },
+      "12000061097254427": {
+       "discount": "9% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡3.22",
+        "value": 3.22
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡2.90|2|90",
+       "salePriceString": "￡2.90",
+       "sellerByLot": false
+      },
+      "12000061097254426": {
+       "discount": "9% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡1.64",
+        "value": 1.64
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡1.48|1|48",
+       "salePriceString": "￡1.48",
+       "sellerByLot": false
+      },
+      "12000061097254425": {
+       "discount": "5% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡7.83",
+        "value": 7.83
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡7.40|7|40",
+       "salePriceString": "￡7.40",
+       "sellerByLot": false
+      },
+      "12000061097254429": {
+       "discount": "4% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡8.93",
+        "value": 8.93
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡8.50|8|50",
+       "salePriceString": "￡8.50",
+       "sellerByLot": false
+      },
+      "12000061097254424": {
+       "discount": "9% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡4.23",
+        "value": 4.23
+       },
+       "priceFontColor": "#000000",
+       "salePriceLocal": "￡3.82|3|82",
+       "salePriceString": "￡3.82",
+       "sellerByLot": false
+      },
+      "12000061097254423": {
+       "discount": "9% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡2.92",
+        "value": 2.92
+       },
+       "priceFontColor": "#EB281F",
+       "salePriceLocal": "￡2.64|2|64",
+       "salePriceString": "￡2.64",
+       "sellerByLot": false
+      },
+      "12000061097254422": {
+       "discount": "9% off",
+       "originalPrice": {
+        "currency": "GBP",
+        "formatedAmount": "￡1.54",
+        "value": 1.54
+       },
+       "priceFontColor": "#EB281F",
+       "salePriceLocal": "￡1.39|1|39",
+       "salePriceString": "￡1.39",
+       "sellerByLot": false
+      }
+     },
+     "targetSkuPriceInfo": {
+      "discount": "9% off",
+      "originalPrice": {
+       "currency": "GBP",
+       "formatedAmount": "￡1.54",
+       "value": 1.54
+      },
+      "priceFontColor": "#EB281F",
+      "salePriceLocal": "￡1.39|1|39",
+      "salePriceString": "￡1.39",
+      "sellerByLot": false
+     }
+    },
+    "PRODUCT_TITLE": {
+     "text": "10/100pcs Mechanical Switch Fidget Clicker Toy 3D Printed DIY Handmade Keycap Blue Switch Stress Relief Creative Keyboard Parts"
+    },
+    "GLOBAL_DATA": {
+     "globalData": {
+      "subject": "10/100pcs Mechanical Switch Fidget Clicker Toy 3D Printed DIY Handmade Keycap Blue Switch Stress Relief Creative Keyboard Parts"
+     }
+    },
+    "PC_RATING": {
+     "rating": "5.0",
+     "totalValidNum": 2,
+     "otherText": "202 sold"
+    },
+    "SHOP_CARD_PC": {
+     "storeName": "Shop5655018 Store",
+     "benefitInfoList": [
+      {
+       "title": "# sold in 180 days ",
+       "value": "20,000+"
+      },
+      {
+       "title": "positive reviews",
+       "value": "95.7%"
+      },
+      {
+       "title": "store rating",
+       "value": "4.9"
+      },
+      {
+       "title": "Communication",
+       "value": "4.7"
+      }
+     ],
+     "sellerInfo": {
+      "storeNum": 5655018,
+      "storeURL": "//www.aliexpress.com/store/5655018",
+      "formatOpenTime": "Mar 10, 2020",
+      "countryCompleteName": "China"
+     }
+    },
+    "PRODUCT_PROP_PC": {
+     "showedProps": [
+      {
+       "attrName": "High-concerned chemical",
+       "attrValue": "None"
+      },
+      {
+       "attrName": "Group",
+       "attrValue": "Unisex"
+      },
+      {
+       "attrName": "Button",
+       "attrValue": "Others"
+      },
+      {
+       "attrName": "Theme",
+       "attrValue": "Cartoon,Glow&Lights"
+      },
+      {
+       "attrName": "Festival",
+       "attrValue": "Non-holiDay"
+      },
+      {
+       "attrName": "Function",
+       "attrValue": "Decoration,Tools"
+      },
+      {
+       "attrName": "Material",
+       "attrValue": "Resin"
+      },
+      {
+       "attrName": "Model Number",
+       "attrValue": "G4585A1"
+      },
+      {
+       "attrName": "Shape\\pattern",
+       "attrValue": "KeY"
+      },
+      {
+       "attrName": "Style",
+       "attrValue": "Vintage"
+      },
+      {
+       "attrName": "Metals Type",
+       "attrValue": "None"
+      },
+      {
+       "attrName": "Metal Color",
+       "attrValue": "None"
+      },
+      {
+       "attrName": "Item Type",
+       "attrValue": "Key chains"
+      },
+      {
+       "attrName": "Fine or Fashion",
+       "attrValue": "fashion"
+      },
+      {
+       "attrName": "Origin",
+       "attrValue": "Mainland China"
+      }
+     ]
+    },
+    "HEADER_IMAGE_PC": {
+     "imagePathList": [
+      "https://ae-pic-a1.aliexpress-media.com/kf/Sbf13bec95fe349ef875c48bf797e3c20J.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/S366df9b5e26c4ea0889b2e6e8586f9bbp.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/Sf6b283bd09b149458ea5c0ddc46f3d3c2.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/S31fd9454c0984cb6a38aaa1f30846eedF.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/S718c3749ca764934a5e9d5657389f7504.jpg",
+      "https://ae-pic-a1.aliexpress-media.com/kf/Sd9351f48fe834e6b993efa0ef5922a92K.jpg"
+     ]
+    },
+    "DESC": {
+     "pcDescUrl": "https://pdp.aliexpress-media.com/product/description/pc/v2/en_US/desc.htm?productId=1005013417484054&key=S833afb07e84b449b8cebe47ac5261716v.zip&token=a64f39d09eac01177803fbfcfa97189e&sellerId=240398843",
+     "instructionInfo": {
+      "title": "Item guides & documents",
+      "mediaUrl": "https://ae-pic-a1.aliexpress-media.com/kf/Ad661c392329b49899445a07c010333a9y.pdf"
+     }
+    },
+    "SHIPPING": {
+     "deliveryLayoutInfo": [
+      {
+       "bizData": {
+        "deliveryProviderName": "Aliexpress Selection Premium shipping",
+        "company": "AliExpress Selection Premium shipping",
+        "shippingFee": "charge",
+        "displayAmount": 1.99,
+        "displayCurrency": "GBP",
+        "logisticsComposeThreshold": "￡8.00",
+        "displayEtaMinDate": "Nov. 29",
+        "displayEtaMaxDate": "Dec. 02",
+        "deliveryDayMin": 7,
+        "deliveryDayMax": 10,
+        "shipFrom": "China",
+        "shipToCode": "UK"
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "desc": "<div class=\"detailmodule_html\"><div class=\"detail-desc-decorate-richtext\"><p align=\"left\" style=\"font-family:none;font-size:12px;font-weight:400;letter-spacing:normal;text-align:left;color:rgb(96, 98, 102);background-color:rgb(255, 255, 255);margin-bottom:1em;margin-top:0px;overflow:auto;box-sizing:inherit\"><span style=\"font-size:22px\"><span style=\"font-family:Arial, Helvetica, sans-serif\">specification<br>\nSize: 1.6 * 1.6cm<br>\nMaterial: PC upper cover, nylon lower cover, POM shaft core, copper internal metal<br>\nNote: 1. The model with pins can be powered on (without LED beads and battery)<br>\n2. Cannot be used for keyboard<br>\nPackage includes: 10 * by axis</span></span><br>\n<img cke-id=\"img50\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Sd5064052bc76498dafd41bd4ea8d5431b.jpg?width=800&height=800&hash=1600\" width=\"800px;\"><img cke-id=\"img51\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Sc9c376712fc64a368b1a935da7eee445A.jpg?width=800&height=800&hash=1600\" width=\"800px;\"><img cke-id=\"img52\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Sa190956f831746a8a9c32fa5407a5000e.jpg?width=1500&height=1500&hash=3000\" width=\"800px;\"><img cke-id=\"img53\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Sb5dc99c96279403db98e38226b10d9468.jpg?width=1500&height=1500&hash=3000\" width=\"800px;\"><img cke-id=\"img54\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Sa26bbaec23ed45588b3b4efa9214ffb3d.jpg?width=1500&height=1500&hash=3000\" width=\"800px;\"><img cke-id=\"img55\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/S82d8eb799b514e818a07de4ba33141562.jpg?width=1500&height=1500&hash=3000\" width=\"800px;\"><img cke-id=\"img56\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/S9d0ba1f4f1d74181aacdfc1415741e530.jpg?width=1500&height=1500&hash=3000\" width=\"800px;\"><img cke-id=\"img57\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Sade0c46095d341feb3b4563f0da484c83.jpg?width=1500&height=1500&hash=3000\" width=\"800px;\"><img cke-id=\"img58\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Sa649acb1c9a641f5a3a4d3fc602713c8P.jpg?width=1500&height=1500&hash=3000\" width=\"800px;\"><img cke-id=\"img59\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Sa5338f2b02a94349b1e5e0e0e11db55eE.jpg?width=1500&height=1500&hash=3000\" width=\"800px;\"><img cke-id=\"img60\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/S753a06a84ac3464dbc2efbbd20d6e507C.jpg?width=1500&height=1500&hash=3000\" width=\"800px;\"><img cke-id=\"img61\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/S5c809ff88211428492c4831e5d68bf30z.jpg?width=800&height=800&hash=1600\" width=\"800px;\"><img cke-id=\"img62\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/S82c6e4d0bcb841658f0029261b12d368P.jpg?width=1500&height=1500&hash=3000\" width=\"800px;\"><img cke-id=\"img63\" referrerpolicy=\"no-referrer\" slate-data-type=\"image\" src=\"https://ae-pic-a1.aliexpress-media.com/kf/Sfc6e897aead0494495ead81be0a27366c.jpg?width=800&height=800&hash=1600\" width=\"800px;\"></p>\n<br>\n&nbsp;</div></div>\r\n\n<script>window.adminAccountId=240398843;</script>\n"
+}

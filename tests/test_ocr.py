@@ -89,3 +89,34 @@ def test_recognise_rejects_non_image():
         pytest.skip("rapidocr-onnxruntime not installed")
     with pytest.raises(ValueError):
         ocr.recognise(b"not an image")
+
+
+def test_rows_join_boxes_side_by_side():
+    def box(x, y, w=80, h=20):
+        return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
+
+    result = [
+        [box(300, 12), "2.10 inch", 0.99],
+        [box(10, 10), "Size:", 0.98],
+        [box(10, 60), "Driver IC:", 0.97],
+        [box(300, 58), "GC9B72", 0.96],
+        [box(10, 110), "noise", 0.2],
+    ]
+    assert ocr.rows(result) == ["Size: 2.10 inch", "Driver IC: GC9B72"]
+
+
+def test_ocr_cache_round_trip(tmp_path):
+    from crawler.fetch_cache import FetchCache
+
+    cache = FetchCache(path=tmp_path / "c.sqlite", ttl=3600)
+    assert cache.get_ocr("https://img/1.jpg") is None
+    cache.put_ocr(
+        "https://img/1.jpg", ["产品参数 Product parameters", "Size: 2.10 inch"]
+    )
+    assert cache.get_ocr("https://img/1.jpg") == [
+        "产品参数 Product parameters",
+        "Size: 2.10 inch",
+    ]
+    off = FetchCache(path=tmp_path / "d.sqlite", ttl=0)
+    off.put_ocr("https://img/1.jpg", ["x"])
+    assert off.get_ocr("https://img/1.jpg") is None

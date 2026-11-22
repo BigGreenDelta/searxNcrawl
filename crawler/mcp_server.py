@@ -492,7 +492,9 @@ async def crawl(
     content (JPEG, scaled down) for callers that can see images; it costs
     many tokens, so leave it off unless the text is not enough. An
     AliExpress slider CAPTCHA returns "blocked by AliExpress anti-bot"; do
-    not retry it right away.
+    not retry it right away. AliExpress pages go out one at a time, 0.5 to
+    3 s apart (cached pages do not wait); aliexpress_fetch_log shows how
+    they went.
 
     Args:
         urls: List of URLs to fetch (required). Accepts a single URL or multiple URLs.
@@ -908,6 +910,28 @@ async def reddit_thread(
         )
     except Exception as exc:
         return f"Error: {exc}"
+
+
+@mcp.tool
+async def aliexpress_fetch_log(days: int = 7):
+    """
+    Summarise this server's AliExpress page fetches over the last N days.
+
+    Every page request to AliExpress (the item route and any fetch tier;
+    not cached repeats, not description images) is logged with its tier,
+    duration and outcome: ok, challenged (slider CAPTCHA or another bot
+    wall) or error. The summary gives totals, the challenge rate, the last
+    challenge, the wait for a turn (pages go out one at a time, 0.5 to 3 s
+    apart), and counts by tier, by day and by hour of day (UTC).
+
+    Args:
+        days: How many days back to count (default 7, 1-90)
+    """
+    from . import page_pacing
+
+    if not 1 <= days <= 90:
+        raise ValueError("days must be between 1 and 90")
+    return page_pacing.summary(days)
 
 
 # =============================================================================

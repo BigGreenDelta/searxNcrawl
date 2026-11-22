@@ -49,7 +49,7 @@ from typing import Iterable, List, Optional
 from .config import PLACEHOLDER_PATTERNS, SETTLE_CAP_MS, TEMPLATE_PATTERN, PageWait
 from .document import CrawledDocument
 from .fetch_cache import FetchCache
-from . import firecrawl_tier
+from . import firecrawl_tier, page_pacing
 
 LOGGER = logging.getLogger(__name__)
 
@@ -764,6 +764,9 @@ async def fetch(
         if tier == "firecrawl" and shell:
             attempts.append("firecrawl: skipped, a free browser loaded the page")
             continue
+        # AliExpress pages go out one at a time, a random gap apart (Firecrawl
+        # requests leave from Firecrawl's servers, not this IP).
+        waited = await page_pacing.wait_turn(url) if tier != "firecrawl" else 0.0
         start = time.monotonic()
         try:
             if tier == "firecrawl":
@@ -777,6 +780,14 @@ async def fetch(
                 doc, html = await _RUNNERS[tier](url, tier_timeout, **extra)
         except Exception as exc:
             attempts.append(f"{tier}: {type(exc).__name__}: {exc}"[:300])
+            page_pacing.record(
+                url,
+                tier,
+                time.monotonic() - start,
+                "error",
+                waited=waited,
+                note=type(exc).__name__,
+            )
             blocked_seen = True
             continue
         if html and doc.status != "failed":
@@ -784,6 +795,16 @@ async def fetch(
             _add_contact_links(doc, html)
         problem = _verdict(doc, html)
         elapsed = time.monotonic() - start
+        if not (tier == "firecrawl" and doc.metadata.get("blocked")):
+            # A Firecrawl call the user did not approve never left: no line.
+            page_pacing.record(
+                url,
+                tier,
+                elapsed,
+                _outcome(doc, problem),
+                waited=waited,
+                note=problem or "",
+            )
         reason = (
             needs_browser(doc, html) if problem is None and tier == "http" else None
         )
@@ -893,6 +914,15 @@ async def fetch(
     )
 
 
+def _outcome(doc: CrawledDocument, problem: Optional[str]) -> str:
+    """ok / challenged / error, for the AliExpress fetch log."""
+    if problem == "challenge page" or doc.metadata.get("blocked"):
+        return "challenged"
+    if doc.status == "failed":
+        return "error"
+    return "ok"
+
+
 def _route_uses_ocr(url: str) -> bool:
     from . import site_routes
 
@@ -921,12 +951,30 @@ async def _run_route(
         return None
     route, target = found
     label = f"route {route.name}"
+    tier = f"route:{route.name}"
+    waited = await page_pacing.wait_turn(target)
     start = time.monotonic()
     try:
         doc = await route.run(target, timeout * 3, ocr)
     except Exception as exc:  # noqa: BLE001 - the tiers still get their go
         attempts.append(f"{label}: {type(exc).__name__}: {exc}"[:300])
+        page_pacing.record(
+            target,
+            tier,
+            time.monotonic() - start,
+            "error",
+            waited=waited,
+            note=type(exc).__name__,
+        )
         return None
+    page_pacing.record(
+        target,
+        tier,
+        time.monotonic() - start,
+        _outcome(doc, _verdict(doc)),
+        waited=waited,
+        note=(doc.error_message or "") if doc.status == "failed" else "",
+    )
     if doc.status == "failed" and doc.metadata.get("final"):
         attempts.append(f"{label}: {doc.error_message}")
         doc.request_url = url

@@ -35,4 +35,10 @@ def _browser_tier_only(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("FETCH_MIN_CHARS", "0")
     monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
     monkeypatch.setattr(fetch_chain, "_cache", None)
+    # No real waits between AliExpress pages; the fetch log goes to tmp.
+    monkeypatch.setenv("ALIEXPRESS_GAP_MIN_S", "0")
+    monkeypatch.setenv("ALIEXPRESS_GAP_MAX_S", "0")
+    monkeypatch.setenv(
+        "ALIEXPRESS_LOG_PATH", str(tmp_path / "aliexpress-fetches.jsonl")
+    )
     firecrawl_tier.reset_approval()

@@ -492,7 +492,9 @@ async def crawl(
     content (JPEG, scaled down) for callers that can see images; it costs
     many tokens, so leave it off unless the text is not enough. An
     AliExpress slider CAPTCHA returns "blocked by AliExpress anti-bot"; do
-    not retry it right away.
+    not retry it right away. AliExpress pages go out one at a time, 0.5 to
+    3 s apart (cached pages do not wait); aliexpress_fetch_log shows how
+    they went.
 
     Args:
         urls: List of URLs to fetch (required). Accepts a single URL or multiple URLs.

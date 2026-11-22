@@ -12,6 +12,7 @@ Crawl one or more web pages and extract their content.
 - Hash routes (`https://site/app#/results/X`) skip the `http` tier, are rendered in a browser and are cached under their own key.
 - AliExpress item pages (`/item/<id>.html`, tracking parameters dropped) come back as a product sheet built from the page's own item data request: title, price (UK region, GBP), rating, review count, orders, store, shipping to the UK, every option group with its option images, every SKU combination with price, sale price, discount, stock and SKU id, the specifications table and the seller's full description. Text in the description images is read by OCR on the server (RapidOCR, offline) and quoted under each image, marked OCR. All description images download at once and are read on a worker pool shared by every crawl, in page order, within a wall-clock budget of `OCR_BUDGET_S` seconds per page (default 15, download and recognition together); an image whose recognition has not started by then is skipped, so skips fall on the last images. `OCR_MAX_IMAGES` (default 60) is a safety cap and `OCR_MAX_BYTES` (default 4 MB) the largest image downloaded. OCR text is cached per image for 30 days, and cached images cost no budget. The page ends with a numbered "Description images" list of every image URL, each marked `OCR read` (with its line count, or "no text found") or `OCR skipped` (with the reason, such as the time budget or `ocr=false`), so a caller can open the rest. With `remove_links=true` the URLs in that list are stripped too.
   - Pool size: `OCR_WORKERS` recognition threads (default: logical CPUs / 4, 1 to 4), each with its own engine and `OCR_THREADS` onnxruntime threads (default: logical CPUs / 2 / workers). The default keeps workers x threads at about the number of physical cores, so 8 cores / 16 threads gives 4 x 2. `OCR_DOWNLOADS` (default 8) caps image downloads at once per page. When AliExpress answers with its slider CAPTCHA the result is a failed page "blocked by AliExpress anti-bot", and no other tier is tried.
+- AliExpress page requests are paced: they go out one at a time, in arrival order, each a random 0.5 to 3 s (uniform) after the one before (`ALIEXPRESS_GAP_MIN_S` / `ALIEXPRESS_GAP_MAX_S`; 0 and 0 turn it off). This covers the item route's page load and every fetch tier that asks an AliExpress page host (`aliexpress.com`, `.us`, `.ru`), such as search pages. Cached pages skip the queue. Description files and images (`aliexpress-media.com`, `alicdn.com`) and Firecrawl requests are not paced. The gap only spaces requests out: nothing is retried or changed when AliExpress shows a challenge. Every attempt is logged, see `aliexpress_fetch_log`.
 
 ### Parameters
 
@@ -176,3 +177,36 @@ search(query="crawl4ai release notes", max_results=3, include_content=True)
 - Provider requests, Chromium installation and browser startup add time beyond the per-page timeout.
 - `SEARCH_RESULT_FIELDS` limits the five base result fields; it does not remove `markdown` or `crawl_error`.
 - If some providers fail, the others' results are returned. If all selected providers fail, or none is configured, the response is `{"error": "...", "query": "..."}` with a short reason per provider, e.g. `All selected search providers failed: searxng: request failed; youcom: API key rejected, check YDC_API_KEY`.
+
+---
+
+## `aliexpress_fetch_log`
+
+Summarise this server's AliExpress page fetches over the last N days: totals, the challenge rate, the last challenge, the wait for a turn, and counts by tier, by day and by hour of day (UTC).
+
+### Parameters
+
+| Parameter | Type  | Default | Description                 |
+|-----------|-------|---------|-----------------------------|
+| `days`    | `int` | `7`     | Days back to count (1-90)   |
+
+### The log
+
+Each AliExpress page attempt (see the pacing note under `crawl`) is one JSON line:
+
+```json
+{"time": "2026-11-22T11:57:53+00:00", "item": "1005003561184819", "url": "https://www.aliexpress.com/item/1005003561184819.html", "tier": "route:aliexpress", "seconds": 2.1, "waited": 1.4, "outcome": "ok"}
+```
+
+- `tier`: `route:aliexpress` or the fetch tier (`http`, `browser`, `stealth`, `vpn`, `firecrawl`).
+- `seconds`: the attempt, without the wait; for the item route it includes the description and OCR.
+- `waited`: seconds spent waiting for the turn.
+- `outcome`: `ok`, `challenged` (slider CAPTCHA or another bot wall) or `error` (with a `note`). A Firecrawl call the user did not approve is not logged.
+
+`ALIEXPRESS_LOG_PATH` sets the file (default `~/.cache/searxncrawl/aliexpress-fetches.jsonl`; `off` turns logging off). It rotates at `ALIEXPRESS_LOG_MAX_BYTES` (default 1 MB) and keeps five old files, which the summary reads too.
+
+### Example
+
+```
+aliexpress_fetch_log(days=1)
+```

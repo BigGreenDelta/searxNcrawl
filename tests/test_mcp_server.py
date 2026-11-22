@@ -238,3 +238,10 @@ async def test_crawl_passes_wait_options_to_the_router(
 async def test_crawl_rejects_wait_ms_out_of_range(wait_ms: int) -> None:
     with pytest.raises(ValueError, match="wait_ms"):
         await mcp_server.crawl(urls=["https://example.com"], wait_ms=wait_ms)
+
+
+def test_remove_links_drops_images_whole() -> None:
+    text = "Intro\n\n![](https://img.example/a.jpg?w=1)\n\n> OCR line\n\n[shop](https://x.example/) and ![alt](https://img.example/b.png)"
+    out = mcp_server._strip_markdown_links(text)
+    assert "![" not in out and "https://" not in out
+    assert "> OCR line" in out and "shop and" in out

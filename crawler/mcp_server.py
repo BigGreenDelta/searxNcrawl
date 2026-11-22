@@ -196,6 +196,8 @@ def _strip_markdown_links(text: str) -> str:
     """
     import re
 
+    # Drop images ![alt](url) whole: stripping only the URL left "![](" behind
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
     # Replace [text](url) with just text
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
     # Remove standalone URLs (http/https)

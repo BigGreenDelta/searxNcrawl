@@ -297,7 +297,7 @@ def offline(monkeypatch: pytest.MonkeyPatch):
         state["ocr_calls"].append(list(urls))
         return (
             {u: [f"text of {u[-6:]}"] for u in urls[:2]},
-            {u: "over the 2-image limit" for u in urls[2:]},
+            {u: "over the 15 s OCR time budget" for u in urls[2:]},
             1.5,
         )
 
@@ -317,8 +317,17 @@ async def test_run_builds_the_page(offline):
     assert len(info["variants"]) == 1
     assert "OCR: 2 of 5 description images read on this server" in doc.markdown
     assert "> text of " in doc.markdown
-    assert "> **OCR skipped:** over the 2-image limit." in doc.markdown
+    assert "> **OCR skipped:** over the 15 s OCR time budget." in doc.markdown
     assert len(offline["ocr_calls"]) == 1
+    # Every description image is listed with its status, in page order.
+    urls = offline["ocr_calls"][0]
+    assert "## Description images (5)" in doc.markdown
+    assert "3 not read by OCR here" in doc.markdown
+    assert f"1. {urls[0]} - OCR read: 1 lines" in doc.markdown
+    assert f"5. {urls[4]} - OCR skipped: over the 15 s OCR time budget" in doc.markdown
+    assert [i["url"] for i in doc.metadata["page_images"]] == urls
+    assert doc.metadata["page_images"][0]["label"] == "description image 1"
+    assert (info["ocr_read"], info["ocr_skipped"]) == (2, 3)
     assert doc.metadata["region"] == {
         "country": "UK",
         "currency": "GBP",
@@ -330,8 +339,44 @@ async def test_run_without_ocr(offline):
     doc = await ae.run(f"https://www.aliexpress.com/item/{SCREEN}.html", 45, ocr=False)
     assert doc.status == "success"
     assert offline["ocr_calls"] == []
-    assert "OCR: off for this crawl (ocr=false)." in doc.markdown
+    assert "OCR: off for this crawl (ocr=false);" in doc.markdown
     assert "**OCR" not in doc.markdown
+    assert "## Description images (5)" in doc.markdown
+    assert "5. https://" in doc.markdown and "OCR off for this crawl" in doc.markdown
+    assert len(doc.metadata["page_images"]) == 5
+
+
+async def test_ocr_cache_hits_cost_no_budget(monkeypatch: pytest.MonkeyPatch):
+    from crawler import fetch_chain, ocr
+
+    class Cache:
+        stored: dict = {}
+
+        def get_ocr(self, url):
+            return ["cached line"] if url in ("u1", "u3") else None
+
+        def put_ocr(self, url, lines):
+            self.stored[url] = lines
+
+    seen: dict = {}
+
+    async def read_images(urls, download, *, cap=None, **kw):
+        seen.update(urls=list(urls), cap=cap)
+        return ocr.OcrResult(
+            texts={"u2": ["fresh line"]},
+            skipped={"u4": "over the 15 s OCR time budget"},
+            seconds=0.5,
+        )
+
+    monkeypatch.setattr(fetch_chain, "_get_cache", lambda: Cache())
+    monkeypatch.setattr(ocr, "available", lambda: True)
+    monkeypatch.setattr(ocr, "read_images", read_images)
+    monkeypatch.setenv("OCR_MAX_IMAGES", "10")
+    texts, skipped, seconds = await ae._ocr(["u1", "u2", "u3", "u4"])
+    assert seen == {"urls": ["u2", "u4"], "cap": 8}
+    assert list(texts) == ["u1", "u2", "u3"]
+    assert skipped == {"u4": "over the 15 s OCR time budget"}
+    assert Cache.stored == {"u2": ["fresh line"]}
 
 
 async def test_run_blocked_is_final(offline):

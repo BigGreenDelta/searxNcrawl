@@ -13,7 +13,9 @@ store, shipping to the UK, every SKU property group with its option images,
 every SKU combination with price, sale price, currency and stock, the
 specifications table and the description. Sellers put much of the
 description into images, so the description images are read with OCR
-(``crawler.ocr``) and the text goes under each image, marked as OCR.
+(``crawler.ocr``) and the text goes under each image, marked as OCR. Every
+description image is also listed at the end with its OCR status, so a caller
+can open the ones the time budget left unread.
 
 When AliExpress answers the pdp request with its slider CAPTCHA
 (``FAIL_SYS_USER_VALIDATE`` / ``RGV587_ERROR`` and a ``_____tmd_____/punish``
@@ -534,60 +536,105 @@ def item_markdown(
 # --- fetching ---------------------------------------------------------------
 
 
-async def _get(url: str, limit: int, accept: str = "*/*") -> Optional[bytes]:
-    """GET ``url`` with a byte cap; None when it fails or is larger than ``limit``."""
+_HEADERS = {"user-agent": _UA, "referer": "https://www.aliexpress.com/"}
+IMAGE_ACCEPT = "image/jpeg,image/png,image/webp,*/*;q=0.5"
+
+
+def _client():
     import httpx
 
-    headers = {
-        "user-agent": _UA,
-        "referer": "https://www.aliexpress.com/",
-        "accept": accept,
-    }
-    async with httpx.AsyncClient(
-        timeout=20, follow_redirects=True, headers=headers
-    ) as client:
-        async with client.stream("GET", url) as resp:
-            if resp.status_code != 200:
+    return httpx.AsyncClient(timeout=20, follow_redirects=True, headers=_HEADERS)
+
+
+async def _get(
+    url: str, limit: int, accept: str = "*/*", client: Any = None
+) -> Optional[bytes]:
+    """GET ``url`` with a byte cap; None when it fails or is larger than ``limit``."""
+    if client is None:
+        async with _client() as own:
+            return await _get(url, limit, accept, own)
+    async with client.stream("GET", url, headers={"accept": accept}) as resp:
+        if resp.status_code != 200:
+            return None
+        size = int(resp.headers.get("content-length") or 0)
+        if size > limit:
+            return None
+        data = bytearray()
+        async for chunk in resp.aiter_bytes():
+            data += chunk
+            if len(data) > limit:
                 return None
-            size = int(resp.headers.get("content-length") or 0)
-            if size > limit:
-                return None
-            data = bytearray()
-            async for chunk in resp.aiter_bytes():
-                data += chunk
-                if len(data) > limit:
-                    return None
-            return bytes(data)
+        return bytes(data)
 
 
 async def _ocr(urls: list[str]) -> tuple[dict, dict, float]:
-    """OCR text by image URL (cached per image), skip reasons, seconds spent."""
+    """OCR text by image URL (cached per image), skip reasons, seconds spent.
+
+    Cached images cost nothing; the rest share the OCR time budget and the
+    image safety cap.
+    """
     from . import fetch_chain, ocr
 
     if not ocr.available():
         return {}, {u: "OCR engine not installed" for u in urls}, 0.0
     cache = fetch_chain._get_cache()
-    texts: dict[str, list[str]] = {}
-    todo = []
-    for url in urls[: ocr.max_images()]:
+    cached: dict[str, list[str]] = {}
+    for url in urls:
         hit = cache.get_ocr(url)
         if hit is not None:
             # Lines cached before the noise filter existed get it now.
-            texts[url] = ocr.clean(hit)
-        else:
-            todo.append(url)
-    result = await ocr.read_images(
-        todo,
-        lambda u: _get(u, ocr.max_bytes(), "image/jpeg,image/png,image/webp,*/*;q=0.5"),
-        limit=len(todo),
-    )
+            cached[url] = ocr.clean(hit)
+    todo = [u for u in urls if u not in cached]
+    cap = max(0, ocr.max_images() - len(cached))
+    async with _client() as client:
+        result = await ocr.read_images(
+            todo,
+            lambda u: _get(u, ocr.max_bytes(), IMAGE_ACCEPT, client),
+            cap=cap,
+        )
     for url, lines in result.texts.items():
         cache.put_ocr(url, lines)
-    texts.update(result.texts)
-    skipped = dict(result.skipped)
-    for url in urls[ocr.max_images() :]:
-        skipped[url] = f"over the {ocr.max_images()}-image limit"
-    return texts, skipped, result.seconds
+    texts = {u: cached.get(u, result.texts.get(u)) for u in urls}
+    texts = {u: t for u, t in texts.items() if t is not None}
+    return texts, result.skipped, result.seconds
+
+
+def image_status(
+    urls: list[str], texts: dict, skipped: dict, ocr_on: bool = True
+) -> list[dict]:
+    """Every description image with what OCR made of it, in page order."""
+    out = []
+    for index, url in enumerate(urls, 1):
+        lines = texts.get(url)
+        if not ocr_on:
+            status, note = "not read", "OCR off for this crawl"
+        elif lines:
+            status, note = "read", f"{len(lines)} lines"
+        elif url in texts:
+            status, note = "read", "no text found"
+        else:
+            status, note = "not read", skipped.get(url, "not read")
+        out.append({"n": index, "url": url, "ocr": status, "note": note})
+    return out
+
+
+def image_list_markdown(images: list[dict]) -> str:
+    """The numbered list of every description image and its OCR status."""
+    if not images:
+        return ""
+    unread = sum(1 for i in images if i["ocr"] != "read")
+    head = f"## Description images ({len(images)})"
+    lines = [head, ""]
+    if unread:
+        lines += [
+            f"{unread} not read by OCR here; open those URLs to read them "
+            "(crawl with images=true returns them as images).",
+            "",
+        ]
+    for i in images:
+        mark = "OCR read" if i["ocr"] == "read" else "OCR skipped"
+        lines.append(f"{i['n']}. {i['url']} - {mark}: {i['note']}")
+    return "\n".join(lines)
 
 
 def request_region(url: str) -> dict:
@@ -759,11 +806,22 @@ async def run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
         read = sum(1 for u in images if u in texts)
         note = (
             f"OCR: {read} of {len(images)} description images read on this server "
-            "(text under each image, marked OCR)."
+            "(text under each image, marked OCR; every image is listed under "
+            "Description images)."
         )
     elif images:
-        note = "OCR: off for this crawl (ocr=false)."
+        note = (
+            "OCR: off for this crawl (ocr=false); every image is listed under "
+            "Description images."
+        )
     description = description_markdown(desc_html, texts, skipped)
+    listed = image_status(images, texts, skipped, ocr_on=ocr)
+    if listed:
+        description += "\n\n" + image_list_markdown(listed)
+        # Route-neutral list of the page's images: crawl(images=true) reads it.
+        meta["page_images"] = [
+            {"url": i["url"], "label": f"description image {i['n']}"} for i in listed
+        ]
     meta["aliexpress"] = {
         "product_id": item["id"],
         "option_groups": [
@@ -774,6 +832,8 @@ async def run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
         "description_chars": len(description),
         "description_images": len(images),
         "ocr_images": sum(1 for u in images if texts.get(u)),
+        "ocr_read": sum(1 for i in listed if i["ocr"] == "read"),
+        "ocr_skipped": sum(1 for i in listed if i["ocr"] != "read"),
     }
     meta["route_seconds"] = round(time.monotonic() - start, 1)
     return CrawledDocument(

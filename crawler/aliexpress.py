@@ -462,6 +462,12 @@ def item_markdown(
         lines.append(
             f"- **Shipping to {to}:** {ship.get('method') or 'standard'}: {', '.join(bits) or 'price not shown'}{when}{origin}"
         )
+    if len(variants) == 1:
+        only = variants[0]
+        if not only.get("available"):
+            lines.append("- **Stock:** sold out")
+        elif only.get("stock") is not None:
+            lines.append(f"- **Stock:** {only['stock']:,} available")
     if item.get("guide"):
         g = item["guide"]
         lines.append(f"- **{g.get('title') or 'Item guide'}:** {g['url']}")
@@ -583,10 +589,39 @@ async def _ocr(urls: list[str]) -> tuple[dict, dict, float]:
     return texts, skipped, result.seconds
 
 
+def request_region(url: str) -> dict:
+    """``country`` / ``_currency`` / ``_lang`` the page sent with its pdp request.
+
+    The page builds them from the region cookie, so they show whether the
+    UK / GBP setting took, even when the answer is the CAPTCHA.
+    """
+    from urllib.parse import parse_qs
+
+    raw = (parse_qs(urlparse(url).query).get("data") or [""])[0]
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    keys = (("country", "country"), ("_currency", "currency"), ("_lang", "lang"))
+    return {name: str(data[key]) for key, name in keys if data.get(key)}
+
+
+def page_blocked(final_url: str, html: str) -> Optional[str]:
+    """Why the item page itself is the CAPTCHA page, or None."""
+    text = (html or "")[:20000].lower()
+    if _PUNISH in (final_url or "") or (
+        _PUNISH in text and ("captcha" in text or "slide" in text)
+    ):
+        return f"{BLOCKED} (slider CAPTCHA instead of the item page)"
+    return None
+
+
 async def _load_pdp(
     url: str, timeout: int
-) -> tuple[Optional[dict], Optional[str], Any]:
-    """The page's own pdp answer, the block reason if it was blocked, the HTTP status."""
+) -> tuple[Optional[dict], Optional[str], Any, dict]:
+    """The page's own pdp answer, why it is missing, the HTTP status, the region sent."""
     from scrapling.fetchers import StealthyFetcher
 
     got: dict[str, Any] = {}
@@ -598,13 +633,17 @@ async def _load_pdp(
         )
 
         def on_response(response):
-            if _PDP_API not in response.url:
-                return
             if _PUNISH in response.url:
                 got.setdefault(
-                    "blocked", f"{BLOCKED} (slider CAPTCHA on the item data request)"
+                    "blocked",
+                    f"{BLOCKED} (slider CAPTCHA on the item data request)"
+                    if _PDP_API in response.url
+                    else f"{BLOCKED} (slider CAPTCHA page)",
                 )
                 return
+            if _PDP_API not in response.url:
+                return
+            got.setdefault("region", request_region(response.url))
 
             async def read():
                 try:
@@ -630,7 +669,7 @@ async def _load_pdp(
                 reads
                 and all(r.done() for r in reads)
                 and ({"pdp", "blocked"} & got.keys())
-            ):
+            ) or ("blocked" in got and not reads):
                 break
             await page.wait_for_timeout(100)
         await asyncio.gather(*reads, return_exceptions=True)
@@ -647,17 +686,22 @@ async def _load_pdp(
         page_action=action,
     )
     status = getattr(resp, "status", None)
+    region = got.get("region") or {}
     if "pdp" in got:
-        return got["pdp"], None, status
+        return got["pdp"], None, status, region
     if "blocked" in got:
-        return None, got["blocked"], status
+        return None, got["blocked"], status, region
+    html = getattr(resp, "html_content", "") or ""
+    reason = page_blocked(str(getattr(resp, "url", "") or ""), str(html))
+    if reason:
+        return None, reason, status, region
     other = got.get("other")
     why = None
     if isinstance(other, dict):
         why = "the item data request failed: " + "; ".join(
             str(r) for r in other.get("ret") or []
         )
-    return None, why, status
+    return None, why, status, region
 
 
 async def run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
@@ -665,14 +709,18 @@ async def run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
     start = time.monotonic()
     pid = item_id(url) or ""
     meta: dict[str, Any] = {"fetched_via": "route:aliexpress"}
-    answer, problem, status = await _load_pdp(url, timeout)
+    answer, problem, status, region = await _load_pdp(url, timeout)
     meta["status_code"] = status
+    if region:
+        meta["region"] = region
     result = pdp_result(answer)
     if result is None:
         blocked = bool(problem and problem.startswith(BLOCKED))
         if blocked:
             meta["blocked"] = True
-            # Another tier on this IP only meets the same check: stop here.
+            # AliExpress turns away this kind of client (the stealth browser,
+            # plain HTTP alike), so the other tiers would only meet the same
+            # check: stop here.
             meta["final"] = True
         why = problem or (
             f"HTTP {status}"

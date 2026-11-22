@@ -911,8 +911,8 @@ async def _run_route(
 
     Routes load pages in the stealth browser, so they run only when the
     stealth tier is in play. A failed route is noted in ``attempts``. A
-    failed page the route marks ``final`` (a site's own anti-bot check on
-    this IP, which every other free tier meets too) is returned as it is.
+    failed page the route marks ``final`` (a site's own anti-bot check, which
+    the other free tiers would only meet again) is returned as it is.
     """
     from . import site_routes
 

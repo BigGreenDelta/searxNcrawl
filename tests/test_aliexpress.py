@@ -161,6 +161,48 @@ def test_screen_without_options():
     assert "## Variants" not in md
     assert "## Options" not in md
     assert "- **Price:** £4.89 (was £12.04) (GBP)" in md
+    assert "- **Stock:** 225 available" in md
+
+
+def test_request_region_from_the_pdp_url():
+    url = (
+        "https://acs.aliexpress.com/h5/mtop.aliexpress.pdp.pc.query/1.0/?jsv=2.5.1"
+        "&data=%7B%22productId%22%3A%221005013417484054%22%2C%22_lang%22%3A%22en_GB"
+        "%22%2C%22_currency%22%3A%22GBP%22%2C%22country%22%3A%22GB%22%7D"
+    )
+    assert ae.request_region(url) == {
+        "country": "GB",
+        "currency": "GBP",
+        "lang": "en_GB",
+    }
+    assert ae.request_region("https://acs.aliexpress.com/h5/x/?data=junk") == {}
+
+
+@pytest.mark.parametrize(
+    "final_url, html, blocked",
+    [
+        (
+            "https://www.aliexpress.com//item/1.html/_____tmd_____/punish?x5secdata=x",
+            "",
+            True,
+        ),
+        (
+            "https://www.aliexpress.com/item/1.html",
+            '<script src="/_____tmd_____/punish.js"></script><div>Please slide to verify</div>',
+            True,
+        ),
+        (
+            "https://www.aliexpress.com/item/1.html",
+            "<html>window.runParams = {}</html>",
+            False,
+        ),
+    ],
+)
+def test_page_blocked(final_url, html, blocked):
+    reason = ae.page_blocked(final_url, html)
+    assert (reason is not None) is blocked
+    if blocked:
+        assert reason.startswith("blocked by AliExpress anti-bot")
 
 
 # --- description ------------------------------------------------------------
@@ -233,7 +275,8 @@ def offline(monkeypatch: pytest.MonkeyPatch):
     state: dict = {"pdp": _fixture(SCREEN)["pdp"], "problem": None, "ocr_calls": []}
 
     async def load_pdp(url, timeout):
-        return state["pdp"], state["problem"], 200
+        region = {"country": "UK", "currency": "GBP", "lang": "en_GB"}
+        return state["pdp"], state["problem"], 200, region
 
     async def get(url, limit, accept="*/*"):
         return _fixture(SCREEN)["desc"].encode()
@@ -264,6 +307,11 @@ async def test_run_builds_the_page(offline):
     assert "> text of " in doc.markdown
     assert "> **OCR skipped:** over the 2-image limit." in doc.markdown
     assert len(offline["ocr_calls"]) == 1
+    assert doc.metadata["region"] == {
+        "country": "UK",
+        "currency": "GBP",
+        "lang": "en_GB",
+    }
 
 
 async def test_run_without_ocr(offline):

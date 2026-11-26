@@ -61,7 +61,13 @@ Every AliExpress sheet starts with a line that says whose prices it shows:
   new-shopper prices.
 
 A session counts as expired when its login cookie has run out, or when the
-page load ends without it. When a session is configured, logged-in and
+page load ends without it. The route adds its UK / GBP region cookies only
+where the session has none of its own. A logged-in load records two
+diagnostics in the metadata, key names only and never values:
+`session_check` (whether the login cookie was still there, and which pdp
+answer keys look like login markers) and, when the page has a
+`LADDER_PRICE` module the route could not read, `ladder_unread` (its key
+names). When a session is configured, logged-in and
 logged-out sheets are cached apart, and a sheet shown logged out because the
 session could not be used is not cached. After a fresh login the next crawl
 reads the page again.

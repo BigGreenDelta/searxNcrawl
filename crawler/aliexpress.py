@@ -911,9 +911,16 @@ async def _load_pdp_session(
                     viewport={"width": 1366, "height": 768},
                     storage_state={"cookies": cookies, "origins": []},
                 )
-                await context.add_cookies(
-                    [dict(c, domain=".aliexpress.com", path="/") for c in REGION_COOKIES]
-                )
+                # The UK / GBP region cookies only where the session has none of
+                # its own: never overwrite a cookie of the user's.
+                have = {c.get("name") for c in cookies}
+                region = [
+                    dict(c, domain=".aliexpress.com", path="/")
+                    for c in REGION_COOKIES
+                    if c["name"] not in have
+                ]
+                if region:
+                    await context.add_cookies(region)
 
                 async def skip_heavy(route):
                     if route.request.resource_type in _SKIP_TYPES:
@@ -942,6 +949,47 @@ async def _load_pdp_session(
         ) from None
     answer, problem, status, region = _pdp_outcome(got, status, final_url, html)
     return answer, problem, status, region, site_sessions.has_login_cookie(after, spec)
+
+
+_LOGIN_KEY = re.compile(r"buyer|member|login|logged|user|shopper|newuser", re.IGNORECASE)
+
+
+def login_keys(result: dict, limit: int = 20) -> list[str]:
+    """Paths of keys in the pdp answer that may tell a logged-in page (names only).
+
+    Kept in the metadata of logged-in loads, so one real load shows which
+    field marks the login; values are never recorded.
+    """
+    found: list[str] = []
+
+    def walk(value: Any, path: str, depth: int) -> None:
+        if len(found) >= limit or depth > 4:
+            return
+        if isinstance(value, dict):
+            for key, inner in value.items():
+                here = f"{path}.{key}" if path else str(key)
+                if _LOGIN_KEY.search(str(key)):
+                    found.append(here)
+                walk(inner, here, depth + 1)
+
+    walk(result, "", 0)
+    return found[:limit]
+
+
+def ladder_shape(result: dict) -> Optional[dict]:
+    """Key names of an unread ``LADDER_PRICE`` module (no values), or None."""
+    module = _module(result, "LADDER_PRICE")
+    if not module or ladder_prices(result):
+        return None
+    shape: dict[str, Any] = {"module_keys": sorted(map(str, module))}
+    view = module.get("ladderPriceViewMap")
+    if isinstance(view, dict) and view:
+        tiers = next(iter(view.values()))
+        tier = tiers[0] if isinstance(tiers, list) and tiers else tiers
+        if isinstance(tier, dict):
+            shape["tier_keys"] = sorted(map(str, tier))
+            shape["bulkPrice_type"] = type(tier.get("bulkPrice")).__name__
+    return shape
 
 
 def _session() -> tuple[Any, str, str]:
@@ -1018,6 +1066,13 @@ async def run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
         )
     item = item_data(result, pid)
     meta["page_seconds"] = round(time.monotonic() - start, 1)
+    if session is not None:
+        # Unverified signals, names only: which answer keys could mark a
+        # logged-in page, kept so a real load can confirm the login check.
+        meta["session_check"] = {"login_cookie_after": state == LOGGED_IN, "login_keys": login_keys(result)}
+    shape = ladder_shape(result)
+    if shape:
+        meta["ladder_unread"] = shape
 
     desc_html = None
     if item["desc_url"]:

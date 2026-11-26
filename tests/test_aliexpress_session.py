@@ -9,7 +9,9 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -324,3 +326,116 @@ def test_cache_variant_words():
     url = ITEM_URL
     assert fetch_chain._cache_variant("https://example.com/", False) == ""
     assert fetch_chain._cache_variant(url, True) in ("", "session")
+
+
+# --- diagnostics -------------------------------------------------------------------
+
+
+def test_login_keys_are_names_only():
+    result = {"GLOBAL_DATA": {"buyerId": FAKE, "nested": {"isLogin": True}}, "PRICE": {"x": 1}}
+    keys = ae.login_keys(result)
+    assert keys == ["GLOBAL_DATA.buyerId", "GLOBAL_DATA.nested.isLogin"]
+    assert FAKE not in json.dumps(keys)
+
+
+def test_unread_ladder_reports_its_shape():
+    result = {"LADDER_PRICE": {"ladderPriceViewMap": {"1": [{"minQty": 2, "bulkPrice": ["?"]}]}}}
+    assert ae.ladder_shape(result) == {
+        "module_keys": ["ladderPriceViewMap"],
+        "tier_keys": ["bulkPrice", "minQty"],
+        "bulkPrice_type": "list",
+    }
+    read = {"LADDER_PRICE": {"ladderPriceViewMap": {"1": [{"bulkQuantity": 2, "bulkPrice": "£1.00"}]}}}
+    assert ae.ladder_shape(read) is None
+    assert ae.ladder_shape({}) is None
+
+
+# --- the logged-in page load, in a real headless browser ------------------------------
+
+
+class _ItemSite(BaseHTTPRequestHandler):
+    """An item page whose script asks for the pdp answer, like the real one."""
+
+    seen: list = []
+    pdp: bytes = b""
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        type(self).seen.append((self.path, self.headers.get("Cookie", "")))
+        if ae._PDP_API in self.path:
+            body, kind = type(self).pdp, "application/json"
+        else:
+            body = (
+                "<html><body>item<script>"
+                f"fetch('/h5/{ae._PDP_API}/1.0/?jsv=1')"
+                "</script></body></html>"
+            ).encode()
+            kind = "text/html"
+        self.send_response(200)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@pytest.fixture
+def item_site(monkeypatch):
+    _ItemSite.seen = []
+    _ItemSite.pdp = json.dumps(_fixture(SCREEN)["pdp"]).encode()
+    server = HTTPServer(("127.0.0.1", 0), _ItemSite)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    # The local server stands in for AliExpress, so its host counts as the site.
+    spec = site_sessions.SITES["aliexpress"]
+    monkeypatch.setitem(
+        site_sessions.SITES,
+        "aliexpress",
+        site_sessions.Site(**{**spec.__dict__, "domains": ("127.0.0.1",)}),
+    )
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+def _local_cookie(name: str, value: str = FAKE) -> dict:
+    return {
+        "name": name,
+        "value": value,
+        "domain": "127.0.0.1",
+        "path": "/",
+        "expires": time.time() + 3600,
+    }
+
+
+async def test_logged_in_load_sends_the_session_and_reads_the_answer(item_site):
+    cookies = [_local_cookie("_hvn_login"), _local_cookie("aep_usuc_f", "own-region")]
+    answer, problem, status, region, still_in = await ae._load_pdp_session(
+        f"{item_site}/item/{SCREEN}.html", 20, cookies
+    )
+    assert problem is None and status == 200
+    assert ae.pdp_result(answer) is not None
+    assert still_in is True
+    page_cookies = _ItemSite.seen[0][1]
+    assert f"_hvn_login={FAKE}" in page_cookies
+    # The user's own region cookie is kept, never replaced by the route's.
+    assert "aep_usuc_f=own-region" in page_cookies
+    assert any(ae._PDP_API in path for path, _ in _ItemSite.seen)
+
+
+async def test_logged_in_load_sees_a_dropped_login(item_site):
+    cookies = [_local_cookie("other")]
+    *_, still_in = await ae._load_pdp_session(f"{item_site}/item/{SCREEN}.html", 20, cookies)
+    assert still_in is False
+
+
+async def test_logged_in_load_errors_name_only_the_type(monkeypatch):
+    import patchright.async_api as pw_api
+
+    def broken():
+        raise RuntimeError(FAKE)
+
+    monkeypatch.setattr(pw_api, "async_playwright", broken)
+    with pytest.raises(ae.SessionLoadError) as err:
+        await ae._load_pdp_session("https://www.aliexpress.com/item/1.html", 5, [_cookie("a")])
+    assert str(err.value) == "logged-in page load failed (RuntimeError)"
+    assert FAKE not in str(err.value)

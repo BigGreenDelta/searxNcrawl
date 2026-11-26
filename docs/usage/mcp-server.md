@@ -133,6 +133,34 @@ it.
 - The source is `crawler/skills/web/SKILL.md`. Every folder under
   `crawler/skills/` with a `SKILL.md` is served the same way.
 
+## MCP Tasks
+
+`crawl_site` and large `crawl` calls can run as MCP Tasks (`io.modelcontextprotocol/tasks`,
+SEP-2663, through `fastmcp-tasks`). A client that declares the extension on the request gets
+a task id at once instead of waiting; it polls `tasks/get` for progress and the result and
+can stop the work with `tasks/cancel`. Clients without the extension, and every older
+protocol connection, get the normal synchronous answer.
+
+- Which calls run as tasks: every `crawl_site`; `crawl` with 5 or more URLs or with 2 or
+  more AliExpress item pages. Smaller calls answer inline, since a task costs the client
+  at least one poll.
+- Progress: `crawl` reports `<done>/<total> pages done` and `crawl_site` reports
+  `<n> pages crawled (limit <max_pages>)`. Inside a task this is the `tasks/get` status
+  message; a synchronous call with a progress token gets MCP progress notifications.
+- Cancel: `tasks/cancel` cancels the running crawl. Pages in flight are dropped and no new
+  page request starts.
+- Firecrawl spend: inside a task the spend question puts the task in `input_required`;
+  the client answers through `tasks/update` and the crawl continues.
+- Polls: the server suggests one every 2 s. A task and its result are kept for 2 hours
+  from creation (`ttlMs`).
+- Backend: Docket's in-process `memory://` store, so tasks end with the server process:
+  a restart or redeploy loses running tasks and kept results. `FASTMCP_DOCKET_URL`
+  (for example `redis://localhost:6379/0`) moves them to Redis. `FASTMCP_DOCKET_CONCURRENCY`
+  sets how many tasks run at once (default here 4; each `crawl_site` opens a browser).
+- Claude Code: terminal sessions on v2.1.304 or later use tasks; the call returns at once,
+  the footer shows `1 MCP task`, and the result arrives as a task notification. `/tasks`
+  shows the progress and stops a task. One-shot `claude -p "<prompt>"` runs do not get tasks.
+
 ## HTTP Host and CORS guards
 
 - Host and Origin guards validate request headers; they do not authenticate callers.

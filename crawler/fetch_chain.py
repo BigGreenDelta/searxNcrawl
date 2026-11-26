@@ -704,7 +704,7 @@ async def fetch(
     to skip it; such a page is cached apart from the OCR one.
     """
     cache = _get_cache()
-    variant = "no-ocr" if not ocr and _route_uses_ocr(url) else ""
+    variant = _cache_variant(url, ocr)
     if not fresh:
         cached = cache.get(url, variant)
         if cached is not None:
@@ -721,7 +721,10 @@ async def fetch(
 
     routed = await _run_route(url, order, timeout, attempts, ocr)
     if routed is not None:
-        cache.put(routed, variant)
+        # A route marks a page it should not keep (a logged-out sheet shown
+        # because the configured session could not be used).
+        if not routed.metadata.get("no_cache"):
+            cache.put(routed, variant)
         return routed
 
     blocked_seen = False
@@ -926,11 +929,22 @@ def _outcome(doc: CrawledDocument, problem: Optional[str]) -> str:
     return "ok"
 
 
-def _route_uses_ocr(url: str) -> bool:
+def _cache_variant(url: str, ocr: bool) -> str:
+    """The fetch cache variant of ``url``: "no-ocr", a route's own word, both or ""."""
     from . import site_routes
 
     found = site_routes.match(url)
-    return bool(found and found[0].uses_ocr)
+    if found is None:
+        return ""
+    route = found[0]
+    parts = []
+    if not ocr and route.uses_ocr:
+        parts.append("no-ocr")
+    if route.cache_variant is not None:
+        word = route.cache_variant()
+        if word:
+            parts.append(word)
+    return ",".join(parts)
 
 
 async def _run_route(

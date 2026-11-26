@@ -230,6 +230,40 @@ def _variants(sku: dict, price_map: dict, groups: list[dict]) -> list[dict]:
     return rows
 
 
+def _bulk_price(value: Any) -> Optional[float]:
+    if isinstance(value, dict):
+        for key in ("value", "amount", "formatedAmount"):
+            found = _num(value.get(key))
+            if found is not None:
+                return found
+        return None
+    return _num(value)
+
+
+def ladder_prices(result: dict) -> dict[str, list[dict]]:
+    """Quantity prices per SKU id from ``LADDER_PRICE.ladderPriceViewMap``.
+
+    Each SKU maps to its tiers, lowest quantity first: ``quantity`` pieces or
+    more cost ``price`` each.
+    """
+    view = _module(result, "LADDER_PRICE").get("ladderPriceViewMap")
+    out: dict[str, list[dict]] = {}
+    if not isinstance(view, dict):
+        return out
+    for sku_id, tiers in view.items():
+        rows = []
+        for tier in tiers if isinstance(tiers, list) else []:
+            if not isinstance(tier, dict):
+                continue
+            quantity = _num(tier.get("bulkQuantity"))
+            price = _bulk_price(tier.get("bulkPrice"))
+            if quantity and price is not None:
+                rows.append({"quantity": int(quantity), "price": price})
+        if rows:
+            out[str(sku_id)] = sorted(rows, key=lambda r: r["quantity"])
+    return out
+
+
 def _shipping(result: dict) -> list[dict]:
     out = []
     for layout in _module(result, "SHIPPING").get("deliveryLayoutInfo") or []:
@@ -270,6 +304,9 @@ def item_data(result: dict, pid: str = "") -> dict:
     price_map = price.get("skuIdStrPriceInfoMap") or {}
     groups = _options(sku)
     variants = _variants(sku, price_map if isinstance(price_map, dict) else {}, groups)
+    ladder = ladder_prices(result)
+    for variant in variants:
+        variant["bulk"] = ladder.get(variant["sku_id"], [])
     rating = _module(result, "PC_RATING")
     shop = _module(result, "SHOP_CARD_PC")
     seller = shop.get("sellerInfo") if isinstance(shop.get("sellerInfo"), dict) else {}
@@ -398,13 +435,65 @@ def _price_text(p: dict) -> str:
     return money(sale if sale is not None else price, cur)
 
 
+# Which prices a sheet shows, by session state (see ``run``).
+LOGGED_IN = "logged_in"
+NO_SESSION = "none"
+EXPIRED = "expired"
+SESSION_ERROR = "error"
+
+
+def session_line(state: Optional[str], why: str = "") -> str:
+    """The sheet's first line: whose prices these are."""
+    if state == LOGGED_IN:
+        return (
+            "- **Prices:** your own, logged in with your AliExpress session. "
+            "\"Your price\" is what you pay for one piece; \"Bulk\" is the "
+            "price per piece from the quantity shown."
+        )
+    fallback = (
+        "this is the logged-out sheet: sale prices are new-shopper (welcome "
+        "deal) prices, not your regular price"
+    )
+    if state == EXPIRED:
+        return (
+            "- **Prices:** your AliExpress session has expired or was not "
+            f"accepted, so {fallback}. Log in again (`login` skill)."
+        )
+    if state == SESSION_ERROR:
+        reason = f" ({why})" if why else ""
+        return (
+            f"- **Prices:** the AliExpress session could not be read{reason}, "
+            f"so {fallback}."
+        )
+    if state == NO_SESSION:
+        return (
+            f"- **Prices:** logged out (no AliExpress session on this server), "
+            f"so {fallback}. Log in with the `login` skill."
+        )
+    return ""
+
+
+def bulk_text(bulk: list[dict], currency: str) -> str:
+    """``£5.11 each - £10.22 for 2``: the first quantity tier."""
+    if not bulk:
+        return ""
+    tier = bulk[0]
+    qty, price = tier["quantity"], tier["price"]
+    return f"{money(price, currency)} each - {money(price * qty, currency)} for {qty}"
+
+
 def item_markdown(
     item: dict,
     url: str,
     description: str = "",
     ocr_note: str = "",
+    session: Optional[str] = None,
+    session_why: str = "",
 ) -> str:
     lines = [f"# {item.get('title') or 'AliExpress item ' + str(item.get('id'))}", ""]
+    head = session_line(session, session_why)
+    if head:
+        lines.append(head)
     variants = item.get("variants") or []
     price = _price_text(item.get("price") or {})
     sales = [v["sale_price"] for v in variants if v.get("sale_price") is not None]
@@ -467,6 +556,8 @@ def item_markdown(
         )
     if len(variants) == 1:
         only = variants[0]
+        if only.get("bulk"):
+            lines.append(f"- **Bulk:** {bulk_text(only['bulk'], only.get('currency') or '')}")
         if not only.get("available"):
             lines.append("- **Stock:** sold out")
         elif only.get("stock") is not None:
@@ -494,14 +585,23 @@ def item_markdown(
                 lines.append(f"- {value['name']}{image}")
     if variants and (groups or len(variants) > 1):
         names = [g["name"] for g in groups]
+        has_bulk = any(v.get("bulk") for v in variants)
+        if session == LOGGED_IN:
+            sale_head = "Your price (logged in)"
+        elif session in (NO_SESSION, EXPIRED, SESSION_ERROR):
+            sale_head = "Sale price (new-shopper)"
+        else:
+            sale_head = "Sale price"
+        heads = [*names, "Price", sale_head]
+        if has_bulk:
+            heads.append("Bulk (logged in)" if session == LOGGED_IN else "Bulk")
+        heads += ["Discount", "Stock", "SKU"]
         lines += [
             "",
             f"## Variants ({len(variants)})",
             "",
-            "| "
-            + " | ".join([*names, "Price", "Sale price", "Discount", "Stock", "SKU"])
-            + " |",
-            "|" + "---|" * (len(names) + 5),
+            "| " + " | ".join(heads) + " |",
+            "|" + "---|" * len(heads),
         ]
         for v in variants:
             stock = v.get("stock")
@@ -510,14 +610,15 @@ def item_markdown(
                 if not v.get("available")
                 else (f"{stock:,}" if stock is not None else "")
             )
+            cur_v = v.get("currency") or ""
             cells = [
                 *[v["options"].get(n, "") for n in names],
-                money(v.get("price"), v.get("currency") or ""),
-                money(v.get("sale_price"), v.get("currency") or ""),
-                v.get("discount") or "",
-                stock_text,
-                v.get("sku_id") or "",
+                money(v.get("price"), cur_v),
+                money(v.get("sale_price"), cur_v),
             ]
+            if has_bulk:
+                cells.append(bulk_text(v.get("bulk") or [], cur_v))
+            cells += [v.get("discount") or "", stock_text, v.get("sku_id") or ""]
             lines.append("| " + " | ".join(_cell(c) for c in cells) + " |")
         if variants[0].get("currency"):
             lines += ["", f"Prices in {variants[0]['currency']}."]
@@ -667,6 +768,71 @@ def page_blocked(final_url: str, html: str) -> Optional[str]:
     return None
 
 
+def _pdp_listener(got: dict, reads: list) -> Any:
+    """A page ``response`` handler that keeps the pdp answer in ``got``."""
+
+    def on_response(response):
+        if _PUNISH in response.url:
+            got.setdefault(
+                "blocked",
+                f"{BLOCKED} (slider CAPTCHA on the item data request)"
+                if _PDP_API in response.url
+                else f"{BLOCKED} (slider CAPTCHA page)",
+            )
+            return
+        if _PDP_API not in response.url:
+            return
+        got.setdefault("region", request_region(response.url))
+
+        async def read():
+            try:
+                answer = parse_mtop(await response.text())
+            except Exception as exc:  # noqa: BLE001 - reported as no data below
+                LOGGER.debug("AliExpress pdp answer unreadable: %s", type(exc).__name__)
+                return
+            reason = blocked_reason(answer)
+            if reason:
+                got.setdefault("blocked", reason)
+            elif pdp_result(answer):
+                got["pdp"] = answer
+            elif answer is not None:
+                got.setdefault("other", answer)
+
+        reads.append(asyncio.ensure_future(read()))
+
+    return on_response
+
+
+async def _wait_pdp(page: Any, got: dict, reads: list) -> None:
+    for _ in range(_PDP_WAIT_MS // 100):
+        if (
+            reads and all(r.done() for r in reads) and ({"pdp", "blocked"} & got.keys())
+        ) or ("blocked" in got and not reads):
+            break
+        await page.wait_for_timeout(100)
+    await asyncio.gather(*reads, return_exceptions=True)
+
+
+def _pdp_outcome(
+    got: dict, status: Any, final_url: str, html: str
+) -> tuple[Optional[dict], Optional[str], Any, dict]:
+    region = got.get("region") or {}
+    if "pdp" in got:
+        return got["pdp"], None, status, region
+    if "blocked" in got:
+        return None, got["blocked"], status, region
+    reason = page_blocked(final_url, html)
+    if reason:
+        return None, reason, status, region
+    other = got.get("other")
+    why = None
+    if isinstance(other, dict):
+        why = "the item data request failed: " + "; ".join(
+            str(r) for r in other.get("ret") or []
+        )
+    return None, why, status, region
+
+
 async def _load_pdp(
     url: str, timeout: int
 ) -> tuple[Optional[dict], Optional[str], Any, dict]:
@@ -675,53 +841,16 @@ async def _load_pdp(
 
     got: dict[str, Any] = {}
     reads: list[asyncio.Future] = []
+    on_response = _pdp_listener(got, reads)
 
     async def setup(page):
         await page.context.add_cookies(
             [dict(c, domain=".aliexpress.com", path="/") for c in REGION_COOKIES]
         )
-
-        def on_response(response):
-            if _PUNISH in response.url:
-                got.setdefault(
-                    "blocked",
-                    f"{BLOCKED} (slider CAPTCHA on the item data request)"
-                    if _PDP_API in response.url
-                    else f"{BLOCKED} (slider CAPTCHA page)",
-                )
-                return
-            if _PDP_API not in response.url:
-                return
-            got.setdefault("region", request_region(response.url))
-
-            async def read():
-                try:
-                    answer = parse_mtop(await response.text())
-                except Exception as exc:  # noqa: BLE001 - reported as no data below
-                    LOGGER.debug("AliExpress pdp answer unreadable: %s", exc)
-                    return
-                reason = blocked_reason(answer)
-                if reason:
-                    got.setdefault("blocked", reason)
-                elif pdp_result(answer):
-                    got["pdp"] = answer
-                elif answer is not None:
-                    got.setdefault("other", answer)
-
-            reads.append(asyncio.ensure_future(read()))
-
         page.on("response", on_response)
 
     async def action(page):
-        for _ in range(_PDP_WAIT_MS // 100):
-            if (
-                reads
-                and all(r.done() for r in reads)
-                and ({"pdp", "blocked"} & got.keys())
-            ) or ("blocked" in got and not reads):
-                break
-            await page.wait_for_timeout(100)
-        await asyncio.gather(*reads, return_exceptions=True)
+        await _wait_pdp(page, got, reads)
         return page
 
     with seeded_profile() as profile:
@@ -737,22 +866,150 @@ async def _load_pdp(
             **stealth_profile_kwargs(profile),
         )
     status = getattr(resp, "status", None)
-    region = got.get("region") or {}
-    if "pdp" in got:
-        return got["pdp"], None, status, region
-    if "blocked" in got:
-        return None, got["blocked"], status, region
-    html = getattr(resp, "html_content", "") or ""
-    reason = page_blocked(str(getattr(resp, "url", "") or ""), str(html))
-    if reason:
-        return None, reason, status, region
-    other = got.get("other")
-    why = None
-    if isinstance(other, dict):
-        why = "the item data request failed: " + "; ".join(
-            str(r) for r in other.get("ret") or []
-        )
-    return None, why, status, region
+    html = str(getattr(resp, "html_content", "") or "")
+    return _pdp_outcome(got, status, str(getattr(resp, "url", "") or ""), html)
+
+
+class SessionLoadError(RuntimeError):
+    """The logged-in page load failed. The message names only the error type."""
+
+
+_SKIP_TYPES = ("image", "media", "font")
+
+
+async def _load_pdp_session(
+    url: str, timeout: int, cookies: list[dict]
+) -> tuple[Optional[dict], Optional[str], Any, dict, bool]:
+    """Like :func:`_load_pdp`, with the user's cookies; also whether they still log in.
+
+    The session never touches disk. Scrapling's stealth fetch always runs a
+    persistent context, whose cookies Chromium writes to the profile on
+    disk, so this load uses patchright directly: ``launch()`` plus
+    ``new_context()`` is an off-the-record context that keeps every cookie in
+    memory. Its default headless browser is ``chrome-headless-shell``, which
+    has no password manager and so never runs Chromium's Windows blank
+    password logon probe (see :mod:`crawler.chromium_profile`). Errors are
+    re-raised with their type only, so no cookie can reach a log.
+    """
+    from patchright.async_api import async_playwright
+
+    from . import site_sessions
+
+    spec = site_sessions.SITES["aliexpress"]
+    got: dict[str, Any] = {}
+    reads: list[asyncio.Future] = []
+    on_response = _pdp_listener(got, reads)
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            try:
+                major = str(browser.version).split(".")[0]
+                agent = _UA.replace("Chrome/142.0.0.0", f"Chrome/{major}.0.0.0")
+                context = await browser.new_context(
+                    user_agent=agent,
+                    locale="en-US",
+                    viewport={"width": 1366, "height": 768},
+                    storage_state={"cookies": cookies, "origins": []},
+                )
+                # The UK / GBP region cookies only where the session has none of
+                # its own: never overwrite a cookie of the user's.
+                have = {c.get("name") for c in cookies}
+                region = [
+                    dict(c, domain=".aliexpress.com", path="/")
+                    for c in REGION_COOKIES
+                    if c["name"] not in have
+                ]
+                if region:
+                    await context.add_cookies(region)
+
+                async def skip_heavy(route):
+                    if route.request.resource_type in _SKIP_TYPES:
+                        await route.abort()
+                    else:
+                        await route.continue_()
+
+                await context.route("**/*", skip_heavy)
+                page = await context.new_page()
+                page.on("response", on_response)
+                resp = await page.goto(
+                    url, wait_until="domcontentloaded", timeout=timeout * 1000
+                )
+                await _wait_pdp(page, got, reads)
+                after = site_sessions.site_cookies_or_empty(
+                    {"cookies": await context.cookies()}, spec
+                )
+                html = "" if "pdp" in got else await page.content()
+                final_url = page.url
+                status = resp.status if resp is not None else None
+            finally:
+                await browser.close()
+    except Exception as exc:  # noqa: BLE001 - see the docstring
+        raise SessionLoadError(
+            f"logged-in page load failed ({type(exc).__name__})"
+        ) from None
+    answer, problem, status, region = _pdp_outcome(got, status, final_url, html)
+    return answer, problem, status, region, site_sessions.has_login_cookie(after, spec)
+
+
+_LOGIN_KEY = re.compile(r"buyer|member|login|logged|user|shopper|newuser", re.IGNORECASE)
+
+
+def login_keys(result: dict, limit: int = 20) -> list[str]:
+    """Paths of keys in the pdp answer that may tell a logged-in page (names only).
+
+    Kept in the metadata of logged-in loads, so one real load shows which
+    field marks the login; values are never recorded.
+    """
+    found: list[str] = []
+
+    def walk(value: Any, path: str, depth: int) -> None:
+        if len(found) >= limit or depth > 4:
+            return
+        if isinstance(value, dict):
+            for key, inner in value.items():
+                here = f"{path}.{key}" if path else str(key)
+                if _LOGIN_KEY.search(str(key)):
+                    found.append(here)
+                walk(inner, here, depth + 1)
+
+    walk(result, "", 0)
+    return found[:limit]
+
+
+def ladder_shape(result: dict) -> Optional[dict]:
+    """Key names of an unread ``LADDER_PRICE`` module (no values), or None."""
+    module = _module(result, "LADDER_PRICE")
+    if not module or ladder_prices(result):
+        return None
+    shape: dict[str, Any] = {"module_keys": sorted(map(str, module))}
+    view = module.get("ladderPriceViewMap")
+    if isinstance(view, dict) and view:
+        tiers = next(iter(view.values()))
+        tier = tiers[0] if isinstance(tiers, list) and tiers else tiers
+        if isinstance(tier, dict):
+            shape["tier_keys"] = sorted(map(str, tier))
+            shape["bulkPrice_type"] = type(tier.get("bulkPrice")).__name__
+    return shape
+
+
+def _session() -> tuple[Any, str, str]:
+    """The AliExpress session to use, its state word and why there is none.
+
+    A session whose login cookies have run out is not used: the page is
+    loaded logged out and labelled expired.
+    """
+    from . import site_sessions
+
+    try:
+        session, why = site_sessions.get("aliexpress")
+    except Exception as exc:  # noqa: BLE001 - logged-out sheet still works
+        return None, SESSION_ERROR, type(exc).__name__
+    if session is None:
+        has_ref = "aliexpress" in site_sessions.configured_refs()
+        return None, (SESSION_ERROR if has_ref else NO_SESSION), (why or "")
+    if not site_sessions.has_login_cookie(session.cookies, site_sessions.SITES["aliexpress"]):
+        return None, EXPIRED, ""
+    return session, LOGGED_IN, ""
 
 
 async def run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
@@ -760,13 +1017,34 @@ async def run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
     start = time.monotonic()
     pid = item_id(url) or ""
     meta: dict[str, Any] = {"fetched_via": "route:aliexpress"}
-    answer, problem, status, region = await _load_pdp(url, timeout)
+    session, state, why = _session()
+    loaded = None
+    if session is not None:
+        try:
+            *loaded, still_in = await _load_pdp_session(url, timeout, session.cookies)
+            # Unverified until checked on a real login: a session the site no
+            # longer accepts is taken to lose its login cookie on the page load.
+            state = LOGGED_IN if still_in else EXPIRED
+        except SessionLoadError as exc:
+            # The logged-out sheet still works; it says why it is logged out.
+            session, state, why, loaded = None, SESSION_ERROR, str(exc), None
+    answer, problem, status, region = loaded or await _load_pdp(url, timeout)
+    meta["session"] = state
+    if state in (EXPIRED, SESSION_ERROR):
+        # A session is configured but was not used: do not keep this sheet,
+        # so the next fetch after a fresh login is not served from the cache.
+        meta["no_cache"] = True
     meta["status_code"] = status
     if region:
         meta["region"] = region
     result = pdp_result(answer)
     if result is None:
         blocked = bool(problem and problem.startswith(BLOCKED))
+        if session is not None:
+            # Never fall back to a logged-out load of the same page: a
+            # CAPTCHA would only meet more checks, and a failed logged-in
+            # load is reported as it is.
+            meta["final"] = True
         if blocked:
             meta["blocked"] = True
             # AliExpress turns away this kind of client (the stealth browser,
@@ -788,6 +1066,13 @@ async def run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
         )
     item = item_data(result, pid)
     meta["page_seconds"] = round(time.monotonic() - start, 1)
+    if session is not None:
+        # Unverified signals, names only: which answer keys could mark a
+        # logged-in page, kept so a real load can confirm the login check.
+        meta["session_check"] = {"login_cookie_after": state == LOGGED_IN, "login_keys": login_keys(result)}
+    shape = ladder_shape(result)
+    if shape:
+        meta["ladder_unread"] = shape
 
     desc_html = None
     if item["desc_url"]:
@@ -843,6 +1128,6 @@ async def run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
         request_url=url,
         final_url=url,
         status="success",
-        markdown=item_markdown(item, url, description, note),
+        markdown=item_markdown(item, url, description, note, state, why),
         metadata=meta,
     )

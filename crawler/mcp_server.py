@@ -118,7 +118,8 @@ Web reading and search. crawl reads any URL (markdown or json) through \
 cheapest-first tiers, the last of them paid; crawl_site reads a small site; \
 search queries the configured providers; reddit_posts and reddit_thread are \
 the only way to read reddit.com; aliexpress_fetch_log reports AliExpress \
-fetches. A "Blocked:" result is the user's no to paid fetching: do not retry \
+fetches; site_sessions shows which logged-in sessions are configured. A \
+"Blocked:" result is the user's no to paid fetching: do not retry \
 or work around it. An empty page or zero results is a suspected block, not \
 absence. Load the "web" skill (skill://web/SKILL.md) for site tricks, \
 AliExpress costs and output limits."""
@@ -1068,6 +1069,22 @@ async def aliexpress_fetch_log(days: int = 7):
     if not 1 <= days <= 90:
         raise ValueError("days must be between 1 and 90")
     return page_pacing.summary(days)
+
+
+@mcp.tool
+async def site_sessions():
+    """
+    Which logged-in site sessions this server uses (AliExpress today).
+
+    Non-secret status only: per site, the 1Password reference the route reads
+    at fetch time (SITE_SESSIONS) and where op gets its sign-in from. Whether
+    the session still logs in shows on the page itself: every AliExpress
+    sheet says whose prices it shows. To log in or refresh, use the "login"
+    skill (skill://login/SKILL.md).
+    """
+    from . import site_sessions as sessions
+
+    return sessions.status()
 
 
 # =============================================================================

@@ -44,7 +44,7 @@ import logging
 import os
 import re
 import time
-from typing import Iterable, List, Optional
+from typing import Awaitable, Callable, Iterable, List, Optional
 
 from .config import PLACEHOLDER_PATTERNS, SETTLE_CAP_MS, TEMPLATE_PATTERN, PageWait
 from .document import CrawledDocument
@@ -1011,7 +1011,13 @@ async def fetch_many(
     fresh: bool = False,
     wait: Optional[PageWait] = None,
     ocr: bool = True,
+    on_done: Optional[Callable[[CrawledDocument], Awaitable[None]]] = None,
 ) -> List[CrawledDocument]:
+    """Fetch every URL (``concurrency`` at a time), results in input order.
+
+    ``on_done(doc)`` is awaited as each page finishes, in completion order
+    (progress reporting); a failing callback is logged and ignored.
+    """
     import asyncio
 
     semaphore = asyncio.Semaphore(max(1, concurrency))
@@ -1020,7 +1026,7 @@ async def fetch_many(
     async def one(u: str) -> CrawledDocument:
         async with semaphore:
             extra = {"wait": wait} if wait else {}
-            return await fetch(
+            doc = await fetch(
                 u,
                 approve=approve,
                 tiers=tier_list,
@@ -1029,5 +1035,11 @@ async def fetch_many(
                 **extra,
                 **({} if ocr else {"ocr": False}),
             )
+        if on_done is not None:
+            try:
+                await on_done(doc)
+            except Exception as exc:  # noqa: BLE001 - progress must not break a fetch
+                LOGGER.debug("Fetch progress callback failed: %s", exc)
+        return doc
 
     return list(await asyncio.gather(*(one(u) for u in urls)))

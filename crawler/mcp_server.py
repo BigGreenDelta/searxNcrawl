@@ -39,7 +39,8 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, List, Optional
@@ -49,9 +50,11 @@ from fastmcp import Context, FastMCP
 from fastmcp.server.elicitation import AcceptedElicitation, parse_elicit_response_type
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 from fastmcp.skills.extension import SkillsExtension
+from fastmcp.utilities.tasks import TaskConfig
+from fastmcp_tasks import TasksExtension
 from mcp.server.request_state import RequestStateSecurity
 
-from . import fetch_chain, firecrawl_tier, search_orchestrator
+from . import aliexpress, fetch_chain, firecrawl_tier, search_orchestrator
 from .config import PageWait
 from .document import CrawledDocument
 from .env import load_config
@@ -133,6 +136,107 @@ mcp = FastMCP(
 _skills = SkillsDirectoryProvider(roots=SKILLS_DIR, experimental_skills=True)
 mcp.add_provider(_skills)
 mcp.add_extension(SkillsExtension(providers=[_skills]))
+
+
+# =============================================================================
+# MCP TASKS (SEP-2663)
+# =============================================================================
+#
+# Long calls can run as MCP Tasks: the client gets a task id at once, keeps
+# working and polls tasks/get for progress and the result; tasks/cancel stops
+# the work. Only clients that declare io.modelcontextprotocol/tasks on the
+# request get a task; every other call runs synchronously as before. The
+# backend is Docket's in-process memory:// store (FASTMCP_DOCKET_URL can point
+# it at Redis), so with the default tasks and their results end with the
+# server process: a restart loses them.
+
+# crawl runs as a task from this many URLs, or from this many AliExpress item
+# pages (paced one at a time, each with OCR). Smaller crawls answer inline:
+# a task costs the client at least one poll round trip.
+TASK_MIN_URLS = 5
+TASK_MIN_ALIEXPRESS_ITEMS = 2
+# Suggested gap between tasks/get polls (Claude Code: 2 s for jobs under a
+# minute) and how long a task and its result are kept from creation.
+TASK_POLL_INTERVAL = timedelta(seconds=2)
+TASK_TTL = timedelta(hours=2)
+# Tasks that run at once; each crawl_site opens its own browser.
+TASK_CONCURRENCY = 4
+
+_TASK = TaskConfig(mode="optional", poll_interval=TASK_POLL_INTERVAL)
+
+
+def wants_task(tool: str, arguments: Optional[dict]) -> bool:
+    """Whether a tools/call is long enough to run as a task."""
+    if tool == "crawl_site":
+        return True
+    if tool != "crawl":
+        return False
+    urls = (arguments or {}).get("urls") or []
+    if isinstance(urls, str):
+        urls = [urls]
+    if len(urls) >= TASK_MIN_URLS:
+        return True
+    items = sum(1 for u in urls if isinstance(u, str) and aliexpress.item_id(u))
+    return items >= TASK_MIN_ALIEXPRESS_ITEMS
+
+
+class RouterTasks(TasksExtension):
+    """The tasks extension, tasking only the calls :func:`wants_task` picks.
+
+    SEP-2663 lets the server decide per request. FastMCP tasks every call of an
+    ``optional`` tool when the client opts in; a one-page crawl does not need
+    that, so short calls pass straight through and answer inline.
+    """
+
+    async def intercept_tool_call(self, params, context, call_next):
+        if not wants_task(params.name, params.arguments):
+            return await call_next()
+        return await super().intercept_tool_call(params, context, call_next)
+
+    @asynccontextmanager
+    async def lifespan(self):
+        async with super().lifespan():
+            # fastmcp-tasks 4.1 creates Docket with its 15-minute default
+            # execution TTL (the task's ttlMs). Claude Code asks servers to
+            # keep a finished result for at least an hour.
+            docket = getattr(self.server, "_docket", None)
+            if docket is not None:
+                docket.execution_ttl = TASK_TTL
+            yield
+
+
+def _tasks_extension() -> RouterTasks:
+    # FASTMCP_DOCKET_CONCURRENCY wins over the default here.
+    if os.getenv("FASTMCP_DOCKET_CONCURRENCY"):
+        return RouterTasks()
+    return RouterTasks(concurrency=TASK_CONCURRENCY)
+
+
+mcp.add_extension(_tasks_extension())
+
+
+def _page_progress(ctx: Optional[Context], total: int, *, limit: bool = False):
+    """A callback reporting "pages done / total" on each finished page.
+
+    Foreground calls with a progress token get MCP progress notifications;
+    a task's progress shows in its tasks/get status message. With
+    ``limit=True`` the total is an upper bound (crawl_site's max_pages).
+    """
+    if ctx is None or total < 1:
+        return None
+    done = 0
+
+    async def report(*_args: Any) -> None:
+        nonlocal done
+        done += 1
+        shown = min(done, total)
+        if limit:
+            message = f"{done} pages crawled (limit {total})"
+        else:
+            message = f"{shown}/{total} pages done"
+        await ctx.report_progress(shown, total, message)
+
+    return report
 
 
 class OutputFormat(str, Enum):
@@ -404,6 +508,9 @@ async def _fetch_with_spend_input(
     extra: dict = {"wait": wait} if wait else {}
     if not ocr:
         extra["ocr"] = False
+    progress = _page_progress(ctx, len(urls))
+    if progress is not None:
+        extra["on_done"] = progress
     if answer is None:
         docs = await fetch_chain.fetch_many(
             urls,
@@ -439,6 +546,7 @@ async def _fetch_with_spend_input(
         concurrency=concurrency,
         timeout=timeout,
         fresh=True,
+        **({"on_done": progress} if progress is not None else {}),
     )
     by_url = dict(zip(rest, rest_docs)) | dict(zip(paid, paid_docs))
     return [by_url[u] for u in urls]
@@ -457,7 +565,7 @@ def _wait_config(wait: Optional[PageWait]) -> dict:
     return {"config": build_markdown_run_config(wait=wait)}
 
 
-@mcp.tool
+@mcp.tool(task=_TASK)
 async def crawl(
     urls: List[str],
     output_format: str = "markdown",
@@ -503,6 +611,10 @@ async def crawl(
     not retry it right away. AliExpress pages go out one at a time, 0.5 to
     3 s apart (cached pages do not wait); aliexpress_fetch_log shows how
     they went.
+
+    With a client that supports MCP Tasks, a call with 5 or more URLs, or
+    2 or more AliExpress item pages, runs as a background task with
+    "pages done / total" progress; smaller calls answer inline.
 
     Args:
         urls: List of URLs to fetch (required). Accepts a single URL or multiple URLs.
@@ -582,6 +694,7 @@ async def crawl(
             return result
         docs = result
     elif auth is None:
+        progress = _page_progress(ctx, len(urls))
         docs = await fetch_chain.fetch_many(
             urls,
             approve=_make_approver(ctx),
@@ -590,6 +703,7 @@ async def crawl(
             fresh=fresh,
             **({"wait": wait} if wait else {}),
             **({} if ocr else {"ocr": False}),
+            **({"on_done": progress} if progress is not None else {}),
         )
     elif len(urls) == 1:
         try:
@@ -635,7 +749,7 @@ async def crawl(
     return [mcp_types.TextContent(type="text", text=f"{text}\n\n{note}"), *blocks]
 
 
-@mcp.tool
+@mcp.tool(task=_TASK)
 async def crawl_site(
     url: str,
     max_depth: int = 2,
@@ -646,9 +760,14 @@ async def crawl_site(
     remove_links: bool = False,
     dedup_mode: str = "exact",
     storage_state: Optional[str] = None,
+    ctx: Optional[Context] = None,
 ):
     """
     Crawl an entire website starting from a seed URL using DFS strategy.
+
+    With a client that supports MCP Tasks this runs as a background task:
+    the client gets a task id at once, progress reports pages crawled
+    against max_pages, and cancelling the task stops the crawl.
 
     Args:
         url: The seed URL to start crawling from
@@ -709,6 +828,7 @@ async def crawl_site(
             dedup_mode=dedup_mode,
             auth={"storage_state": storage_state} if storage_state else None,
             timeout=timeout,
+            on_page=_page_progress(ctx, max_pages, limit=True),
         )
     except TimeoutError:
         timeout_doc = CrawledDocument(

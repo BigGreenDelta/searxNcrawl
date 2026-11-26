@@ -1,6 +1,6 @@
 ---
 name: login
-description: Log the user in to a site (AliExpress) for this web router, as a short questionnaire. The user logs in themselves in a browser window; the session goes to 1Password and into the router's memory, never to disk and never through the model. Use when the user wants the router to see their own prices or logged-in pages, says "log in to AliExpress", "refresh my AliExpress session", "the session expired", or a crawl says the session is missing or expired.
+description: Log the user in to a site (AliExpress) for this web router, as a short questionnaire. The user logs in themselves in a browser window; the session goes to 1Password, where the router reads it at fetch time, never to disk and never through the model. Use when the user wants the router to see their own prices or logged-in pages, says "log in to AliExpress", "refresh my AliExpress session", "the session expired", or a crawl says the session is missing or expired.
 ---
 
 # Site login questionnaire
@@ -8,8 +8,9 @@ description: Log the user in to a site (AliExpress) for this web router, as a sh
 The router can fetch some sites with the user's own login, so prices and
 pages are the ones they see. The session is a secret. You never see it:
 `site-login` takes it from a browser window the user logs in to, writes it
-to 1Password over stdin and pushes it to the router. You only pick options
-and pass names.
+to 1Password over stdin, and the router reads that item with its own
+read-only service account at fetch time. You only pick options and pass
+names.
 
 ## Hard rules
 
@@ -46,20 +47,19 @@ that the 1Password CLI must be signed in first.
    an existing item that looks like this site's session, if any, then
    "New item: <Site> session". An existing item is updated in place: only its
    session field and its `site` / `captured` / `expires` fields change.
-4. **Router.** The router gets the session by push. If `SITE_LOGIN_ROUTER` and
-   `SITE_LOGIN_BEARER_REF` are set in the environment, add `--push`. If not,
-   ask for the router base URL and the `op://` reference of its bearer token
-   (a reference is not a secret), and pass `--router` and `--bearer-ref`.
-   If the user has neither, skip the push and say the router will not see the
-   session until `site-login push` runs.
-5. **Confirm.** One question that restates site, vault, item and push target,
-   with "Start login" and "Cancel".
+4. **Router check.** Call the router's `site_sessions` tool. If its `op_ref`
+   for this site is not `op://<vault>/<item>/storage_state` for the vault and
+   item picked, say so: the router will not see this login until its
+   `SITE_SESSIONS` points at that item and its service account can read the
+   vault. Ask whether to go on anyway.
+5. **Confirm.** One question that restates site, vault and item, with
+   "Start login" and "Cancel".
 6. **Run.** Start `site-login capture --site <site> --vault <vault> --item
-   <item> [--new-vault] [--push ...]` in the background (it waits up to 10
+   <item> [--new-vault]` in the background (it waits up to 10
    minutes). Tell the user: "Log in in the window that opened. It closes by
    itself once you are logged in."
 7. **Report.** When it ends, give the lines it printed: `saved` (the `op://`
-   reference), `cookies`, `expires`, and `router` when pushed. Nothing else.
+   reference), `cookies` and `expires`. Nothing else.
 
 ## When it does not finish
 
@@ -70,15 +70,12 @@ that the 1Password CLI must be signed in first.
 - An `op` error: report its one line. A service account may lack write rights
   to that vault or the right to create vaults; offer another vault.
 
-## After a router restart
+## Refreshing
 
-The router keeps a pushed session in memory only, so a restart or deploy
-forgets it. Push the saved one again, no new login needed:
-
-```bash
-site-login push --site aliexpress --ref op://<vault>/<item>/storage_state
-```
+The router reads the item at every fetch, so a restart or deploy changes
+nothing and a refresh is the same flow with the same vault and item.
 
 AliExpress crawls say in their first lines whether the prices are the user's
-own (logged in), or new-shopper prices because there is no session or it has
-expired. An expired session needs a new login (steps 1 to 7).
+own (logged in), or new-shopper prices because there is no session, it has
+expired or it could not be read. An expired session needs a new login
+(steps 1 to 7).

@@ -41,6 +41,9 @@ class Route:
     run: Callable[[str, int, bool], Awaitable[CrawledDocument]]
     # The route reads text from images, so ``ocr=False`` pages are cached apart.
     uses_ocr: bool = False
+    # A word that keeps this route's pages apart in the fetch cache (for
+    # example while a logged-in session is configured), or "" for none.
+    cache_variant: Optional[Callable[[], str]] = None
 
 
 # --- Thingiverse ----------------------------------------------------------
@@ -345,9 +348,22 @@ def _aliexpress_match(url: str) -> Optional[str]:
     return aliexpress.canonical_url(url)
 
 
+def _aliexpress_cache_variant() -> str:
+    from . import site_sessions
+
+    # Logged-in sheets and logged-out sheets never share a cache entry.
+    return "session" if "aliexpress" in site_sessions.configured_refs() else ""
+
+
 ROUTES: tuple[Route, ...] = (
     Route("thingiverse", _thingiverse_match, _thingiverse_run),
-    Route("aliexpress", _aliexpress_match, _aliexpress_run, uses_ocr=True),
+    Route(
+        "aliexpress",
+        _aliexpress_match,
+        _aliexpress_run,
+        uses_ocr=True,
+        cache_variant=_aliexpress_cache_variant,
+    ),
 )
 
 

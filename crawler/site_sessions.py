@@ -2,16 +2,19 @@
 
 A site session is the cookie part of a Playwright ``storage_state`` for one
 site (AliExpress first). It is a secret: it never goes to a file, a log, the
-fetch cache, a command line or an environment variable. It reaches the server
-in one of two ways, both in memory:
+fetch cache, a command line or an environment variable of this process.
 
-- ``SITE_SESSIONS`` names a 1Password reference per site
-  (``aliexpress=op://<vault>/<item>/<field>``). At fetch time the route runs
-  ``op read`` and keeps the answer in memory for that fetch. This works only
-  where ``op`` can sign in without a person (a service account).
-- ``POST /sessions/<site>`` on the HTTP server (behind the bearer token) puts
-  a session into this process's memory. ``site-login push`` sends it from a
-  machine that can read 1Password. A restart forgets it.
+``SITE_SESSIONS`` names a 1Password reference per site
+(``aliexpress=op://<vault>/<item>/<field>``). At fetch time the route runs
+``op read`` and keeps the answer in memory for that one fetch.
+
+``op`` signs in with a service account. On Windows its token sits in the
+Windows Credential Manager (generic credential named by
+``SITE_SESSIONS_OP_CREDENTIAL``, default ``web-mcp/1password-service-account``)
+and is put only into the environment of the ``op`` child process, so the
+server and the browsers it starts never hold it in their environment.
+Elsewhere ``op`` uses whatever sign-in it already has
+(``OP_SERVICE_ACCOUNT_TOKEN`` or the desktop app).
 
 Only cookies of the site's own domains are kept. Local storage and every
 other domain are dropped on the way in, so a session can never reach another
@@ -25,13 +28,11 @@ import logging
 import os
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 LOGGER = logging.getLogger(__name__)
 
-# A storage_state for one site is a few KB; anything far larger is not one.
-MAX_STATE_BYTES = 512 * 1024
 OP_TIMEOUT_S = 30
 
 
@@ -169,34 +170,8 @@ def describe(cookies: list[dict], spec: Site) -> dict:
 
 # --- where the server gets a session ----------------------------------------
 
-
-@dataclass
-class _Pushed:
-    cookies: list[dict]
-    at: float = field(default_factory=time.time)
-
-
-_PUSHED: dict[str, _Pushed] = {}
-
-
-def push(name: str, body: bytes) -> dict:
-    """Keep a pushed storage_state (JSON bytes) in memory; non-secret status back."""
-    spec = site(name)
-    if len(body) > MAX_STATE_BYTES:
-        raise SessionError("storage_state is too large")
-    try:
-        state = json.loads(body)
-    except (ValueError, UnicodeDecodeError):
-        raise SessionError("storage_state is not valid JSON") from None
-    cookies = site_cookies(state, spec)
-    _PUSHED[spec.name] = _Pushed(cookies)
-    LOGGER.info("%s session received in memory (%d cookies)", spec.title, len(cookies))
-    return describe(cookies, spec)
-
-
-def forget(name: str) -> bool:
-    """Drop a pushed session. True when there was one."""
-    return _PUSHED.pop(site(name).name, None) is not None
+DEFAULT_OP_CREDENTIAL = "web-mcp/1password-service-account"
+TOKEN_ENV = "OP_SERVICE_ACCOUNT_TOKEN"
 
 
 def configured_refs(env: Optional[str] = None) -> dict[str, str]:
@@ -211,6 +186,87 @@ def configured_refs(env: Optional[str] = None) -> dict[str, str]:
     return refs
 
 
+def op_credential_name() -> str:
+    return os.getenv("SITE_SESSIONS_OP_CREDENTIAL", "").strip() or DEFAULT_OP_CREDENTIAL
+
+
+def _cred_read(target: str) -> Optional[str]:
+    """A generic credential's secret from the Windows Credential Manager, or None.
+
+    The blob is read as UTF-16 (what ``CredWrite`` callers on Windows store).
+    Raises :class:`SessionError` with the Win32 error code only.
+    """
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class CREDENTIAL(ctypes.Structure):
+        _fields_ = [
+            ("Flags", wintypes.DWORD),
+            ("Type", wintypes.DWORD),
+            ("TargetName", wintypes.LPWSTR),
+            ("Comment", wintypes.LPWSTR),
+            ("LastWritten", wintypes.FILETIME),
+            ("CredentialBlobSize", wintypes.DWORD),
+            ("CredentialBlob", ctypes.POINTER(ctypes.c_ubyte)),
+            ("Persist", wintypes.DWORD),
+            ("AttributeCount", wintypes.DWORD),
+            ("Attributes", ctypes.c_void_p),
+            ("TargetAlias", wintypes.LPWSTR),
+            ("UserName", wintypes.LPWSTR),
+        ]
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    advapi.CredReadW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+        ctypes.POINTER(ctypes.POINTER(CREDENTIAL)),
+    ]
+    advapi.CredReadW.restype = wintypes.BOOL
+    advapi.CredFree.argtypes = [ctypes.c_void_p]
+    found = ctypes.POINTER(CREDENTIAL)()
+    if not advapi.CredReadW(target, 1, 0, ctypes.byref(found)):  # 1 = CRED_TYPE_GENERIC
+        code = ctypes.get_last_error()
+        if code == 1168:  # ERROR_NOT_FOUND
+            return None
+        raise SessionError(f"cannot read the Windows credential {target} (error {code})")
+    try:
+        cred = found.contents
+        blob = ctypes.string_at(cred.CredentialBlob, cred.CredentialBlobSize)
+    finally:
+        advapi.CredFree(found)
+    return blob.decode("utf-16-le").strip() or None
+
+
+def op_env() -> dict[str, str]:
+    """The environment for one ``op`` child: ours, plus the service account token.
+
+    The token is fetched for this child only and is never put into
+    ``os.environ``.
+    """
+    env = dict(os.environ)
+    if not env.get(TOKEN_ENV):
+        token = _cred_read(op_credential_name())
+        if token:
+            env[TOKEN_ENV] = token
+    return env
+
+
+def token_source() -> str:
+    """Where ``op`` gets its sign-in from (non-secret)."""
+    if os.getenv(TOKEN_ENV):
+        return TOKEN_ENV
+    if os.name == "nt":
+        try:
+            found = _cred_read(op_credential_name()) is not None
+        except SessionError as exc:
+            return str(exc)
+        if found:
+            return f"Windows credential {op_credential_name()}"
+        return f"missing: no Windows credential {op_credential_name()}"
+    return "op's own sign-in"
+
+
 def op_read(ref: str) -> bytes:
     """``op read <ref>`` into memory. The reference is not a secret; the answer is."""
     try:
@@ -219,6 +275,7 @@ def op_read(ref: str) -> bytes:
             capture_output=True,
             timeout=OP_TIMEOUT_S,
             stdin=subprocess.DEVNULL,
+            env=op_env(),
         )
     except FileNotFoundError:
         raise SessionError("the 1Password CLI (op) is not installed here") from None
@@ -235,49 +292,35 @@ class Session:
     """A session ready for one fetch. ``cookies`` is the secret part."""
 
     site: str
-    source: str  # "1password" or "pushed"
     cookies: list[dict]
 
     def __repr__(self) -> str:  # never print the cookies
-        return f"Session(site={self.site!r}, source={self.source!r}, cookies={len(self.cookies)})"
+        return f"Session(site={self.site!r}, cookies={len(self.cookies)})"
 
 
 def get(name: str) -> tuple[Optional[Session], Optional[str]]:
-    """The session for a site and, when there is none, why (non-secret).
-
-    A configured 1Password reference wins; when ``op`` cannot read it, a
-    pushed session is used if there is one.
-    """
+    """The session for a site and, when there is none, why (non-secret)."""
     spec = site(name)
-    problems = []
     ref = configured_refs().get(spec.name)
-    if ref:
-        try:
-            state = json.loads(op_read(ref))
-            return Session(spec.name, "1password", site_cookies(state, spec)), None
-        except SessionError as exc:
-            problems.append(str(exc))
-        except ValueError:
-            problems.append(f"{ref} does not hold a storage_state JSON")
-    pushed = _PUSHED.get(spec.name)
-    if pushed is not None:
-        return Session(spec.name, "pushed", [dict(c) for c in pushed.cookies]), None
-    if not problems:
-        problems.append(f"no {spec.title} session on this server")
-    return None, "; ".join(problems)
+    if not ref:
+        return None, f"no {spec.title} session configured on this server"
+    try:
+        state = json.loads(op_read(ref))
+    except SessionError as exc:
+        return None, str(exc)
+    except ValueError:
+        return None, f"{ref} does not hold a storage_state JSON"
+    try:
+        return Session(spec.name, site_cookies(state, spec)), None
+    except SessionError as exc:
+        return None, f"{ref}: {exc}"
 
 
 def status() -> list[dict]:
-    """Non-secret status of every site: configured reference, pushed session."""
+    """Non-secret status of every site: its 1Password reference and op's sign-in."""
     refs = configured_refs()
-    out = []
-    for name, spec in SITES.items():
-        row: dict[str, Any] = {"site": name, "op_ref": refs.get(name)}
-        pushed = _PUSHED.get(name)
-        if pushed is not None:
-            row["pushed"] = describe(pushed.cookies, spec)
-            row["pushed"]["at"] = time.strftime(
-                "%Y-%m-%d %H:%M UTC", time.gmtime(pushed.at)
-            )
-        out.append(row)
-    return out
+    source = token_source() if refs else None
+    return [
+        {"site": name, "op_ref": refs.get(name), "op_sign_in": source if name in refs else None}
+        for name in SITES
+    ]

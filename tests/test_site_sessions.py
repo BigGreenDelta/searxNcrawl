@@ -1,4 +1,4 @@
-"""In-memory site sessions: filtering, validation, sources. Fake cookies only."""
+"""In-memory site sessions: filtering, validation, the op source. Fake cookies only."""
 
 from __future__ import annotations
 
@@ -23,12 +23,14 @@ def _c(name: str, domain: str, value: str = FAKE, expires: float = -1) -> dict:
     return {"name": name, "value": value, "domain": domain, "path": "/", "expires": expires}
 
 
+FAKE_TOKEN = "ops_fake-token-not-a-secret"
+
+
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     monkeypatch.delenv("SITE_SESSIONS", raising=False)
-    site_sessions._PUSHED.clear()
-    yield
-    site_sessions._PUSHED.clear()
+    monkeypatch.delenv("SITE_SESSIONS_OP_CREDENTIAL", raising=False)
+    monkeypatch.delenv(site_sessions.TOKEN_ENV, raising=False)
 
 
 def test_only_site_domains_are_kept():
@@ -68,60 +70,132 @@ def test_login_cookie_detection():
     )
 
 
-def test_push_keeps_cookies_in_memory_and_reports_no_values():
-    body = json.dumps(_state(_c("_hvn_login", ".aliexpress.com", FAKE, 2_000_000_000), _c("z", ".x.com")))
-    info = site_sessions.push("aliexpress", body.encode())
-    assert info == {"site": "aliexpress", "cookies": 1, "login_cookie": True, "expires": "2033-05-18"}
-    assert FAKE not in json.dumps(site_sessions.status())
-    session, why = site_sessions.get("aliexpress")
-    assert why is None and session.source == "pushed"
-    assert session.cookies[0]["value"] == FAKE
-    assert FAKE not in repr(session)
-    assert site_sessions.forget("aliexpress")
-    session, why = site_sessions.get("aliexpress")
-    assert session is None and "no AliExpress session" in why
-
-
-def test_push_rejects_junk():
-    with pytest.raises(SessionError, match="not valid JSON"):
-        site_sessions.push("aliexpress", b"{nope")
-    with pytest.raises(SessionError, match="too large"):
-        site_sessions.push("aliexpress", b" " * (site_sessions.MAX_STATE_BYTES + 1))
-    with pytest.raises(SessionError, match="unknown site"):
-        site_sessions.push("example", b"{}")
-
-
 def test_configured_refs():
     refs = site_sessions.configured_refs("aliexpress=op://v/i/f, nope=op://a/b/c, x")
     assert refs == {"aliexpress": "op://v/i/f"}
 
 
-def test_op_reference_is_read_into_memory(monkeypatch):
-    monkeypatch.setenv("SITE_SESSIONS", "aliexpress=op://vault/item/storage_state")
+def _fake_op(monkeypatch, body: bytes = b"", code: int = 0, err: bytes = b""):
     calls = []
 
     def fake_run(argv, **kwargs):
         calls.append((argv, kwargs))
-        body = json.dumps(_state(_c("_hvn_login", ".aliexpress.com")))
-        return subprocess.CompletedProcess(argv, 0, body.encode(), b"")
+        return subprocess.CompletedProcess(argv, code, body, err)
 
     monkeypatch.setattr(site_sessions.subprocess, "run", fake_run)
+    return calls
+
+
+def test_no_reference_means_no_session(monkeypatch):
+    calls = _fake_op(monkeypatch)
     session, why = site_sessions.get("aliexpress")
-    assert why is None and session.source == "1password"
+    assert session is None and why == "no AliExpress session configured on this server"
+    assert calls == []
+
+
+def test_op_reference_is_read_into_memory(monkeypatch):
+    monkeypatch.setenv("SITE_SESSIONS", "aliexpress=op://vault/item/storage_state")
+    body = json.dumps(_state(_c("_hvn_login", ".aliexpress.com"), _c("z", ".x.com")))
+    calls = _fake_op(monkeypatch, body.encode())
+    monkeypatch.setattr(site_sessions, "_cred_read", lambda target: None)
+    session, why = site_sessions.get("aliexpress")
+    assert why is None and [c["name"] for c in session.cookies] == ["_hvn_login"]
+    assert FAKE not in repr(session)
     argv, kwargs = calls[0]
     assert argv == ["op", "read", "--no-newline", "op://vault/item/storage_state"]
     assert kwargs.get("capture_output") is True
+    assert kwargs.get("stdin") is subprocess.DEVNULL
 
 
-def test_failed_op_read_falls_back_to_a_pushed_session(monkeypatch):
+def test_windows_token_goes_to_the_op_child_only(monkeypatch):
     monkeypatch.setenv("SITE_SESSIONS", "aliexpress=op://vault/item/storage_state")
+    asked = []
 
-    def fake_run(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 1, b"", b"[ERROR] not signed in\n")
+    def cred_read(target):
+        asked.append(target)
+        return FAKE_TOKEN
 
-    monkeypatch.setattr(site_sessions.subprocess, "run", fake_run)
+    monkeypatch.setattr(site_sessions, "_cred_read", cred_read)
+    body = json.dumps(_state(_c("_hvn_login", ".aliexpress.com")))
+    calls = _fake_op(monkeypatch, body.encode())
+    session, why = site_sessions.get("aliexpress")
+    assert why is None
+    assert asked == ["web-mcp/1password-service-account"]
+    assert calls[0][1]["env"][site_sessions.TOKEN_ENV] == FAKE_TOKEN
+    # Never in this process's own environment, so browsers cannot inherit it.
+    assert site_sessions.TOKEN_ENV not in site_sessions.os.environ
+
+
+def test_credential_name_can_be_changed(monkeypatch):
+    monkeypatch.setenv("SITE_SESSIONS_OP_CREDENTIAL", "other/cred")
+    asked = []
+    monkeypatch.setattr(site_sessions, "_cred_read", lambda t: asked.append(t) or None)
+    env = site_sessions.op_env()
+    assert asked == ["other/cred"] and site_sessions.TOKEN_ENV not in env
+
+
+def test_a_token_already_in_the_environment_wins(monkeypatch):
+    monkeypatch.setenv(site_sessions.TOKEN_ENV, FAKE_TOKEN)
+
+    def cred_read(target):
+        raise AssertionError("Credential Manager must not be read")
+
+    monkeypatch.setattr(site_sessions, "_cred_read", cred_read)
+    assert site_sessions.op_env()[site_sessions.TOKEN_ENV] == FAKE_TOKEN
+    assert site_sessions.token_source() == site_sessions.TOKEN_ENV
+
+
+def test_credential_manager_is_windows_only():
+    if site_sessions.os.name != "nt":
+        assert site_sessions._cred_read("web-mcp/1password-service-account") is None
+
+
+def test_failed_op_read_says_why_without_values(monkeypatch):
+    monkeypatch.setenv("SITE_SESSIONS", "aliexpress=op://vault/item/storage_state")
+    monkeypatch.setattr(site_sessions, "_cred_read", lambda target: FAKE_TOKEN)
+    _fake_op(monkeypatch, code=1, err=b"[ERROR] not signed in\n")
     session, why = site_sessions.get("aliexpress")
     assert session is None and "not signed in" in why
-    site_sessions.push("aliexpress", json.dumps(_state(_c("a", ".aliexpress.com"))).encode())
+    assert FAKE_TOKEN not in why
+
+
+def test_credential_read_error_is_reported(monkeypatch):
+    monkeypatch.setenv("SITE_SESSIONS", "aliexpress=op://vault/item/storage_state")
+
+    def cred_read(target):
+        raise SessionError(f"cannot read the Windows credential {target} (error 1312)")
+
+    monkeypatch.setattr(site_sessions, "_cred_read", cred_read)
+    calls = _fake_op(monkeypatch)
     session, why = site_sessions.get("aliexpress")
-    assert session.source == "pushed"
+    assert session is None and "error 1312" in why
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        (b"{nope", "does not hold a storage_state JSON"),
+        (b'{"cookies": [{"name": "a", "value": "x", "domain": ".google.com"}]}', "no AliExpress cookies"),
+    ],
+)
+def test_bad_item_contents(monkeypatch, body, message):
+    monkeypatch.setenv("SITE_SESSIONS", "aliexpress=op://vault/item/storage_state")
+    monkeypatch.setattr(site_sessions, "_cred_read", lambda target: None)
+    _fake_op(monkeypatch, body)
+    session, why = site_sessions.get("aliexpress")
+    assert session is None and message in why
+
+
+def test_status_holds_no_secret(monkeypatch):
+    monkeypatch.setenv("SITE_SESSIONS", "aliexpress=op://vault/item/storage_state")
+    monkeypatch.setenv(site_sessions.TOKEN_ENV, FAKE_TOKEN)
+    rows = site_sessions.status()
+    assert rows == [
+        {
+            "site": "aliexpress",
+            "op_ref": "op://vault/item/storage_state",
+            "op_sign_in": site_sessions.TOKEN_ENV,
+        }
+    ]
+    assert FAKE_TOKEN not in json.dumps(rows)

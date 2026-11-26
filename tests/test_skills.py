@@ -106,5 +106,5 @@ async def test_login_skill_is_listed():
 def test_login_skill_keeps_the_secret_away_from_the_model():
     text = LOGIN_FILE.read_text(encoding="utf-8")
     assert not any(dash in text for dash in LONG_DASHES)
-    for must in ("AskUserQuestion", "Never read the session", "site-login push", "--accept-unconfirmed"):
+    for must in ("AskUserQuestion", "Never read the session", "site_sessions", "--accept-unconfirmed"):
         assert must in text, must

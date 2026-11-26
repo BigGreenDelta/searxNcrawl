@@ -970,16 +970,22 @@ async def run(url: str, timeout: int, ocr: bool = True) -> CrawledDocument:
     pid = item_id(url) or ""
     meta: dict[str, Any] = {"fetched_via": "route:aliexpress"}
     session, state, why = _session()
+    loaded = None
     if session is not None:
-        answer, problem, status, region, still_in = await _load_pdp_session(
-            url, timeout, session.cookies
-        )
-        # Unverified until checked on a real login: a session the site no
-        # longer accepts is taken to lose its login cookie on the page load.
-        state = LOGGED_IN if still_in else EXPIRED
-    else:
-        answer, problem, status, region = await _load_pdp(url, timeout)
+        try:
+            *loaded, still_in = await _load_pdp_session(url, timeout, session.cookies)
+            # Unverified until checked on a real login: a session the site no
+            # longer accepts is taken to lose its login cookie on the page load.
+            state = LOGGED_IN if still_in else EXPIRED
+        except SessionLoadError as exc:
+            # The logged-out sheet still works; it says why it is logged out.
+            session, state, why, loaded = None, SESSION_ERROR, str(exc), None
+    answer, problem, status, region = loaded or await _load_pdp(url, timeout)
     meta["session"] = state
+    if state in (EXPIRED, SESSION_ERROR):
+        # A session is configured but was not used: do not keep this sheet,
+        # so the next fetch after a fresh login is not served from the cache.
+        meta["no_cache"] = True
     meta["status_code"] = status
     if region:
         meta["region"] = region

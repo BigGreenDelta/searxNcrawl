@@ -100,8 +100,9 @@ currency and stock, the specifications and the full description.
   prices you got: logged in, or new-shopper prices because there is no
   session or it has expired. Those new-shopper prices are not what the user
   pays. To log in or refresh the session, load the `login` skill
-  (`skill://login/SKILL.md`); `site_sessions` shows whether the server holds
-  one. Use `fresh=true` right after a new login: cached sheets predate it.
+  (`skill://login/SKILL.md`); `site_sessions` shows which 1Password item the
+  server reads. A sheet shown logged out while a session is configured is
+  not cached, so the first crawl after a new login reads the page again.
 - `aliexpress_fetch_log` shows recent outcomes (ok, challenged, error), the
   challenge rate and when the last challenge was. Check it before a large
   batch or after a challenge.

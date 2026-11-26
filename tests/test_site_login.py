@@ -143,31 +143,6 @@ def test_capture_gives_up_without_a_login(login_site):
         asyncio.run(site_login.capture(never, headless=True, timeout_s=3, poll_s=0.2))
 
 
-def test_push_sends_cookies_with_the_bearer_from_1password(monkeypatch):
-    monkeypatch.setattr(site_sessions, "op_read", lambda ref: b"tok\n")
-    sent = {}
-
-    class Resp:
-        status_code = 200
-
-        def json(self):
-            return {"cookies": 1}
-
-    def fake_post(url, content, headers, timeout):
-        sent.update(url=url, body=content, headers=headers)
-        return Resp()
-
-    import httpx
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    spec = site_sessions.SITES["aliexpress"]
-    cookie = {"name": "a", "value": FAKE, "domain": ".aliexpress.com", "path": "/", "expires": -1}
-    site_login.push("https://router.example/mcp", spec, [cookie], "op://v/i/token")
-    assert sent["url"] == "https://router.example/sessions/aliexpress"
-    assert sent["headers"]["authorization"] == "Bearer tok"
-    assert json.loads(sent["body"]) == {"cookies": [cookie]}
-
-
 def test_no_terminal_needs_vault_and_item(monkeypatch, capsys):
     monkeypatch.setattr(site_login.sys.stdin, "isatty", lambda: False)
     assert site_login.main(["--site", "aliexpress"]) == 1

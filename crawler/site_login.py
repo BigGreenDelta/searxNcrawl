@@ -3,7 +3,6 @@
 Run on a desktop with a screen and the 1Password CLI::
 
     uv run site-login --site aliexpress --vault <vault> --item <item>
-    uv run site-login push --site aliexpress --ref op://<vault>/<item>/<field>
     uv run site-login vaults
     uv run site-login items --vault <vault>
 
@@ -12,8 +11,8 @@ The person logs in there; the script never types, fills or submits anything.
 It finishes on its own once the browser holds the site's login cookie, or
 when the window is closed after logging in. The cookies are taken from the
 browser in memory, kept to the site's own domains, and written to 1Password
-through ``op`` on stdin. With ``--push`` they also go straight into the web
-router's memory (``POST /sessions/<site>``).
+through ``op`` on stdin. The web router reads that item with its own
+read-only 1Password service account at fetch time (``SITE_SESSIONS``).
 
 The secret never touches disk: the browser context is off the record (its
 cookies stay in memory), the value goes to ``op`` on stdin, never in argv or
@@ -21,9 +20,7 @@ the environment, and the script prints only non-secret facts: the item
 reference, the cookie count and the login cookie's expiry date.
 
 Missing ``--vault`` or ``--item`` are asked for in the terminal when there is
-one. ``SITE_LOGIN_ROUTER`` (router base URL) and ``SITE_LOGIN_BEARER_REF``
-(1Password reference of the router's bearer token) are the defaults of
-``--router`` and ``--bearer-ref``.
+one.
 """
 
 from __future__ import annotations
@@ -31,7 +28,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import re
 import subprocess
 import sys
@@ -229,33 +225,6 @@ async def capture(
     )
 
 
-# --- pushing to the router ---------------------------------------------------
-
-
-def push(router: str, spec: Site, cookies: list[dict], bearer_ref: str) -> dict:
-    """Send the session into the router's memory. Returns its non-secret answer."""
-    import httpx
-
-    if not router:
-        raise SessionError("no router URL: pass --router or set SITE_LOGIN_ROUTER")
-    if not bearer_ref:
-        raise SessionError(
-            "no bearer token reference: pass --bearer-ref or set SITE_LOGIN_BEARER_REF"
-        )
-    token = site_sessions.op_read(bearer_ref).decode().strip()
-    url = router.rstrip("/").removesuffix("/mcp") + f"/sessions/{spec.name}"
-    body = json.dumps({"cookies": cookies}).encode()
-    resp = httpx.post(
-        url,
-        content=body,
-        headers={"authorization": f"Bearer {token}", "content-type": "application/json"},
-        timeout=30,
-    )
-    if resp.status_code != 200:
-        raise SessionError(f"router answered HTTP {resp.status_code} for {url}")
-    return resp.json()
-
-
 # --- terminal picks ----------------------------------------------------------
 
 
@@ -339,26 +308,7 @@ def cmd_capture(args) -> int:
         "cookies": info["cookies"],
         "expires": info["expires"] or "when the browser session ends",
     }
-    if args.push:
-        answer = push(args.router, spec, cookies, args.bearer_ref)
-        out["router"] = f"session in memory ({answer.get('cookies')} cookies)"
     _report(out)
-    return 0
-
-
-def cmd_push(args) -> int:
-    spec = site_sessions.site(args.site)
-    state = json.loads(site_sessions.op_read(args.ref))
-    cookies = site_sessions.site_cookies(state, spec)
-    answer = push(args.router, spec, cookies, args.bearer_ref)
-    _report(
-        {
-            "pushed": args.ref,
-            "router cookies": answer.get("cookies"),
-            "expires": answer.get("expires"),
-            "login cookie": answer.get("login_cookie"),
-        }
-    )
     return 0
 
 
@@ -371,8 +321,6 @@ def _parser() -> argparse.ArgumentParser:
 
     def common(p):
         p.add_argument("--site", default="aliexpress", choices=sorted(site_sessions.SITES))
-        p.add_argument("--router", default=os.getenv("SITE_LOGIN_ROUTER", ""))
-        p.add_argument("--bearer-ref", default=os.getenv("SITE_LOGIN_BEARER_REF", ""))
 
     cap = sub.add_parser("capture", help="log in and save the session (default)")
     common(cap)
@@ -380,17 +328,11 @@ def _parser() -> argparse.ArgumentParser:
     cap.add_argument("--new-vault", action="store_true", help="create --vault first")
     cap.add_argument("--item", help="item title; created when missing")
     cap.add_argument("--field", default=DEFAULT_FIELD)
-    cap.add_argument("--push", action="store_true", help="also send it to the router")
     cap.add_argument("--timeout", type=float, default=600, help="seconds to wait")
     cap.add_argument("--accept-unconfirmed", action="store_true")
     cap.add_argument("--login-url", help="start page (tests)")
     cap.add_argument("--headless", action="store_true", help="no window (tests)")
     cap.set_defaults(func=cmd_capture)
-
-    psh = sub.add_parser("push", help="send a saved session to the router")
-    common(psh)
-    psh.add_argument("--ref", required=True, help="op://vault/item/field")
-    psh.set_defaults(func=cmd_push)
 
     vl = sub.add_parser("vaults", help="list vault names (JSON)")
     vl.set_defaults(func=lambda a: print(json.dumps(vaults())) or 0)
@@ -402,7 +344,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[list[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    commands = {"capture", "push", "vaults", "items", "-h", "--help"}
+    commands = {"capture", "vaults", "items", "-h", "--help"}
     if not argv or argv[0] not in commands:
         argv.insert(0, "capture")
     args = _parser().parse_args(argv)

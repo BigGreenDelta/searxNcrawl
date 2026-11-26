@@ -118,7 +118,7 @@ Web reading and search. crawl reads any URL (markdown or json) through \
 cheapest-first tiers, the last of them paid; crawl_site reads a small site; \
 search queries the configured providers; reddit_posts and reddit_thread are \
 the only way to read reddit.com; aliexpress_fetch_log reports AliExpress \
-fetches; site_sessions shows whether a logged-in session is held. A \
+fetches; site_sessions shows which logged-in sessions are configured. A \
 "Blocked:" result is the user's no to paid fetching: do not retry \
 or work around it. An empty page or zero results is a suspected block, not \
 absence. Load the "web" skill (skill://web/SKILL.md) for site tricks, \
@@ -1074,54 +1074,17 @@ async def aliexpress_fetch_log(days: int = 7):
 @mcp.tool
 async def site_sessions():
     """
-    Which logged-in site sessions this server holds (AliExpress today).
+    Which logged-in site sessions this server uses (AliExpress today).
 
-    Non-secret status only: per site, the configured 1Password reference (if
-    any) and, for a session pushed into memory, its cookie count, whether it
-    holds a login cookie, when that runs out and when it arrived. A restart
-    forgets pushed sessions. To log in or refresh, use the "login" skill
-    (skill://login/SKILL.md).
+    Non-secret status only: per site, the 1Password reference the route reads
+    at fetch time (SITE_SESSIONS) and where op gets its sign-in from. Whether
+    the session still logs in shows on the page itself: every AliExpress
+    sheet says whose prices it shows. To log in or refresh, use the "login"
+    skill (skill://login/SKILL.md).
     """
     from . import site_sessions as sessions
 
     return sessions.status()
-
-
-# Pushed sessions: ``site-login push`` sends a storage_state here. The bearer
-# middleware guards these paths like every other one; without a bearer token
-# configured the server takes no sessions at all. Bodies are never logged or
-# echoed: answers carry counts and dates only.
-
-
-def _session_answer(status: int, body: dict):
-    from starlette.responses import JSONResponse
-
-    return JSONResponse(body, status_code=status)
-
-
-@mcp.custom_route("/sessions/{site}", methods=["POST", "DELETE"], include_in_schema=False)
-async def _sessions_route(request):
-    from . import site_sessions as sessions
-
-    if not os.getenv("MCP_BEARER_TOKEN", "").strip():
-        return _session_answer(
-            403, {"error": "this server takes sessions only with MCP_BEARER_TOKEN set"}
-        )
-    name = request.path_params.get("site", "")
-    try:
-        if request.method == "DELETE":
-            return _session_answer(200, {"site": name, "forgotten": sessions.forget(name)})
-        body = await request.body()
-        return _session_answer(200, sessions.push(name, body))
-    except sessions.SessionError as exc:
-        return _session_answer(400, {"error": str(exc)})
-
-
-@mcp.custom_route("/sessions", methods=["GET"], include_in_schema=False)
-async def _sessions_status(request):
-    from . import site_sessions as sessions
-
-    return _session_answer(200, {"sites": sessions.status()})
 
 
 # =============================================================================

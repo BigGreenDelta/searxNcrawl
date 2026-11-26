@@ -89,3 +89,22 @@ def test_instructions_name_every_tool_and_the_skill():
         SKILL_URI,
     ):
         assert name in text, name
+
+
+LOGIN_URI = "skill://login/SKILL.md"
+LOGIN_FILE = mcp_server.SKILLS_DIR / "login" / "SKILL.md"
+
+
+async def test_login_skill_is_listed():
+    async with _client() as client:
+        skills = await client.list_skills()
+    by_uri = {skill.uri: skill for skill in skills}
+    assert LOGIN_URI in by_uri
+    assert by_uri[LOGIN_URI].frontmatter.name == "login"
+
+
+def test_login_skill_keeps_the_secret_away_from_the_model():
+    text = LOGIN_FILE.read_text(encoding="utf-8")
+    assert not any(dash in text for dash in LONG_DASHES)
+    for must in ("AskUserQuestion", "Never read the session", "site-login push", "--accept-unconfirmed"):
+        assert must in text, must

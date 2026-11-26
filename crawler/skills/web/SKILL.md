@@ -95,6 +95,13 @@ currency and stock, the specifications and the full description.
   wait. A batch of items therefore takes a while.
 - `blocked by AliExpress anti-bot` is a slider CAPTCHA. Do not retry right
   away: retries feed the bot score. Wait, or work from what you have.
+- With the user's own AliExpress session on the server, the sheet shows
+  their own price per SKU and the 2+ pcs price. The first lines say which
+  prices you got: logged in, or new-shopper prices because there is no
+  session or it has expired. Those new-shopper prices are not what the user
+  pays. To log in or refresh the session, load the `login` skill
+  (`skill://login/SKILL.md`); `site_sessions` shows whether the server holds
+  one. Use `fresh=true` right after a new login: cached sheets predate it.
 - `aliexpress_fetch_log` shows recent outcomes (ok, challenged, error), the
   challenge rate and when the last challenge was. Check it before a large
   batch or after a challenge.

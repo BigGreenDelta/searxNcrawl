@@ -18,7 +18,7 @@ from crawl4ai.deep_crawling.filters import DomainFilter
 
 from .browser_setup import ensure_chromium
 from .builder import build_document_from_result
-from .page_hooks import install_reload_hook
+from .page_hooks import PageCallback, install_page_counter, install_reload_hook
 from .auth import AuthInput, resolve_auth
 from .config import build_markdown_run_config, wants_page_reload
 from .document import CrawledDocument
@@ -75,6 +75,7 @@ async def crawl_site_async(
     dedup_mode: str = "exact",
     auth: Optional[AuthInput] = None,
     timeout: float | None = None,
+    on_page: Optional[PageCallback] = None,
 ) -> SiteCrawlResult:
     """
     Crawl a website starting from a seed URL using DFS strategy.
@@ -85,6 +86,8 @@ async def crawl_site_async(
         max_pages: Maximum number of pages to crawl.
         include_subdomains: Whether to include subdomains in the crawl.
         timeout: Overall crawl timeout in seconds. Uses default when None.
+        on_page: Awaited as ``on_page(pages_done, url)`` after each page is
+            captured (progress reporting).
 
     Returns:
         SiteCrawlResult containing documents, errors, and stats.
@@ -140,6 +143,8 @@ async def crawl_site_async(
     async with AsyncWebCrawler(config=browser_cfg) as crawler:
         if wants_page_reload(config):
             install_reload_hook(crawler)
+        if on_page is not None:
+            install_page_counter(crawler, on_page)
         try:
             crawl_result = await asyncio.wait_for(
                 crawler.arun(url=seed_url, config=config),

@@ -16,7 +16,7 @@ as "Blocked by anti-bot protection: no <body> tag"). Running the reload as an
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -54,3 +54,31 @@ def install_reload_hook(crawler: Any) -> None:
     set_hook = getattr(strategy, "set_hook", None)
     if set_hook is not None:
         set_hook("after_goto", reload_after_goto)
+
+
+PageCallback = Callable[[int, str], Awaitable[None]]
+
+
+def install_page_counter(crawler: Any, on_page: PageCallback) -> None:
+    """Call ``on_page(pages_done, url)`` each time the crawler captures a page.
+
+    Uses Crawl4AI's ``before_return_html`` hook, which runs once per page
+    after its HTML is read. A failing callback is logged and never stops the
+    crawl.
+    """
+    strategy = getattr(crawler, "crawler_strategy", None)
+    set_hook = getattr(strategy, "set_hook", None)
+    if set_hook is None:
+        return
+    done = 0
+
+    async def counted(page: Any, html: Any = None, **kwargs: Any) -> Any:
+        nonlocal done
+        done += 1
+        try:
+            await on_page(done, str(getattr(page, "url", "") or ""))
+        except Exception as exc:  # noqa: BLE001 - progress must not break a crawl
+            LOGGER.debug("Page progress callback failed: %s", exc)
+        return page
+
+    set_hook("before_return_html", counted)

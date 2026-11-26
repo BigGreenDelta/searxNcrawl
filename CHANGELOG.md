@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The server publishes a `web` skill over the MCP Skills extension (SEP-2640, `skill://web/SKILL.md`): how to use the tools well, Reddit, MediaWiki, PMC and AliExpress tricks, what empty or `Blocked:` results mean, Firecrawl spend and output limits. Requires FastMCP 4.1.2 or later (the floor was 3.4.3).
 - AliExpress page requests are paced and logged: they go out one at a time, a random 0.5 to 3 s apart (`ALIEXPRESS_GAP_MIN_S` / `ALIEXPRESS_GAP_MAX_S`), after the cache, so repeats within the cache day never wait. Each attempt (item route or fetch tier) is one JSON line in a rotating log (`ALIEXPRESS_LOG_PATH`, default `~/.cache/searxncrawl/aliexpress-fetches.jsonl`) with time, item id, tier, seconds, wait and outcome (ok / challenged / error). The new MCP tool `aliexpress_fetch_log(days)` summarises it: totals, challenge rate, by tier, by day and by hour. Description files, images and Firecrawl requests are not paced; nothing is retried or changed on a challenge.
 - `crawl` gained `images` (default false): the images a site route lists in its `page_images` metadata (the AliExpress description images) come back as MCP image content blocks, JPEG with the long side at most 1568 px, each after a text line with its label and URL. Tall or wide banners are cut into tiles. `CRAWL_IMAGES_MAX` (default 30 blocks) and `CRAWL_IMAGES_MAX_BYTES` (default 12 MB) cap a call; what is left out is named with its URL. Pillow is now a direct dependency.
 - AliExpress pages end with a numbered "Description images" list of every description image URL, marked OCR read or OCR skipped with the reason, so images the OCR budget left unread can still be opened.
@@ -29,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional `vpn` fetch tier between stealth and Firecrawl (`FETCH_VPN_PROXY`, for example a local wireproxy exit): after a tier hit a block or challenge, the page is tried again through the VPN, http first, then the stealth browser. Off when the variable is unset; never used for pages that are only short.
 
 ### Changed
+- The server `instructions` are rewritten: they name every tool (the Reddit and AliExpress tools were missing), drop the You.com mention, state the `Blocked:` and empty-result rules and point to the `web` skill.
 - AliExpress OCR runs in parallel: all description images download at once and are read on a worker pool shared by every crawl (`OCR_WORKERS` engines with `OCR_THREADS` onnxruntime threads each, sized to the physical cores; 4 x 2 on 8 cores / 16 threads). A wall-clock budget per page, `OCR_BUDGET_S` (now 15 s, download included), replaces the 12-image cap; `OCR_MAX_IMAGES` (now 60) stays as a safety cap. Images start in page order, so the budget skips the last ones. Cached images cost no budget.
 
 ### Fixed

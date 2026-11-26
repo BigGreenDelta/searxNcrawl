@@ -1,6 +1,6 @@
 # MCP Server
 
-<!-- Updated: 2026-10-28 -->
+<!-- Updated: 2026-11-26 -->
 
 One-line setup commands for Claude Code, Codex, Cursor and VS Code are in the [README](../../README.md#add-it-to-your-agent). This page covers the server options and manual client configuration.
 
@@ -114,6 +114,24 @@ The first crawl downloads Playwright's Chromium once (about 550 MB on disk); lat
   }
 }
 ```
+
+## Skill: `web`
+
+The server publishes one skill over the MCP Skills extension
+(`io.modelcontextprotocol/skills`, SEP-2640): `skill://web/SKILL.md`, a guide
+for callers. It says which tool fits which site (Reddit, MediaWiki, PMC,
+Thingiverse, AliExpress), what an empty page, an incomplete page or a
+`Blocked:` result means, when a retry can reach the paid Firecrawl tier, and
+how to keep results small. The server `instructions` stay short and point to
+it.
+
+- Clients that support the extension list it with `skills/list` and load it
+  with `skills/get` and `resources/read`; it needs a 2026-07-28 connection.
+- In Claude Code (a terminal session, v2.1.33x) a server added as `web` shows
+  it as `web:web` in `/skills`; Claude loads it when a task needs it. `claude
+  -p` runs do not load MCP skills.
+- The source is `crawler/skills/web/SKILL.md`. Every folder under
+  `crawler/skills/` with a `SKILL.md` is served the same way.
 
 ## HTTP Host and CORS guards
 

@@ -10,7 +10,8 @@ searxNcrawl is an MCP server, CLI and Python package for web search through Sear
 
 | Path | Contents |
 | --- | --- |
-| `crawler/mcp_server.py` | FastMCP server with the `crawl`, `crawl_site` and `search` tools; console scripts `searxncrawl` and `crawl-mcp` |
+| `crawler/mcp_server.py` | FastMCP server with the `crawl`, `crawl_site`, `search`, Reddit and AliExpress log tools; console scripts `searxncrawl` and `crawl-mcp` |
+| `crawler/skills/` | Skills served over MCP (SEP-2640); `web/SKILL.md` is the caller guide |
 | `crawler/cli.py` | `crawl`, `search` and `crawl-capture` commands |
 | `crawler/__init__.py` | Public Python API (`crawl_page`, `crawl_site` and async variants) |
 | `crawler/config.py` | Crawl4AI run configuration and overrides |

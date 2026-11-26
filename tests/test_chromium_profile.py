@@ -60,7 +60,7 @@ def no_chromium_install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(session_capture, "ensure_chromium", noop)
 
 
-# ── helpers ──────────────────────────────────────────────────────────────
+# -- helpers --------------------------------------------------------------
 
 
 def test_needs_seeded_profile_only_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -197,7 +197,7 @@ async def test_storage_state_hook_runs_once_per_context(tmp_path: Path) -> None:
     assert len(ctx.cookies) == 1
 
 
-# ── crawl4ai launch paths ────────────────────────────────────────────────
+# -- crawl4ai launch paths ------------------------------------------------
 
 
 def _recording_crawler(seen: list[dict]):
@@ -322,7 +322,7 @@ async def test_crawl_site_unchanged_off_windows(
     assert cfg.use_persistent_context is False and cfg.user_data_dir is None
 
 
-# ── Scrapling StealthyFetcher launch paths ───────────────────────────────
+# -- Scrapling StealthyFetcher launch paths -------------------------------
 
 
 def _patch_stealthy(monkeypatch: pytest.MonkeyPatch, seen: list[dict]) -> None:
@@ -377,7 +377,7 @@ async def test_stealth_launch_unchanged_off_windows(
     assert seen and "user_data_dir" not in seen[0]
 
 
-# ── session capture ──────────────────────────────────────────────────────
+# -- session capture ------------------------------------------------------
 
 
 class _FakePage:

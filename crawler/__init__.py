@@ -313,6 +313,7 @@ async def crawl_site_async(
     dedup_mode: str = "exact",
     auth: Optional[AuthInput] = None,
     timeout: float | None = None,
+    on_page=None,
 ) -> SiteCrawlResult:
     """Async wrapper that forwards dedup mode to site crawl."""
     return await _crawl_site_async(
@@ -323,6 +324,7 @@ async def crawl_site_async(
         dedup_mode=dedup_mode,
         auth=auth,
         timeout=timeout,
+        on_page=on_page,
     )
 
 

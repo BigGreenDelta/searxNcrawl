@@ -443,7 +443,15 @@ _SPEND_INPUT = "firecrawl_spend"
 
 
 def _modern(ctx: Optional[Context]) -> bool:
-    return ctx is not None and ctx._is_modern_protocol()
+    if ctx is None:
+        return False
+    # A task worker has no live request, and tasks exist only on 2026-07-28.
+    # There a question is asked the same way: the tool returns an
+    # InputRequiredResult, the task parks in input_required, and the answer
+    # arrives through tasks/update on the next leg (ctx.input_responses).
+    from fastmcp_tasks.context import get_task_context
+
+    return get_task_context() is not None or ctx._is_modern_protocol()
 
 
 def _spend_answer(ctx: Context) -> Optional[str]:

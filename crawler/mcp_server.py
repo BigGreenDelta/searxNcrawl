@@ -4,6 +4,9 @@ Provides tools for:
 - Crawling web pages and extracting markdown content
 - Searching the web via the configured providers (SearXNG, You.com),
   queried in parallel and merged into one attributed result list
+- Reading Reddit and summarising AliExpress fetches
+
+Also serves the "web" skill (Skills over MCP), a guide for callers.
 
 Supports both STDIO and HTTP transports.
 
@@ -38,11 +41,14 @@ import sys
 import time
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any, List, Optional
 
 import mcp.types as mcp_types
 from fastmcp import Context, FastMCP
 from fastmcp.server.elicitation import AcceptedElicitation, parse_elicit_response_type
+from fastmcp.server.providers.skills import SkillsDirectoryProvider
+from fastmcp.skills.extension import SkillsExtension
 from mcp.server.request_state import RequestStateSecurity
 
 from . import fetch_chain, firecrawl_tier, search_orchestrator
@@ -104,27 +110,29 @@ def _request_state_security() -> RequestStateSecurity:
     return RequestStateSecurity.ephemeral(ttl=_REQUEST_STATE_TTL, audience="web-router")
 
 
+SERVER_INSTRUCTIONS = """\
+Web reading and search. crawl reads any URL (markdown or json) through \
+cheapest-first tiers, the last of them paid; crawl_site reads a small site; \
+search queries the configured providers; reddit_posts and reddit_thread are \
+the only way to read reddit.com; aliexpress_fetch_log reports AliExpress \
+fetches. A "Blocked:" result is the user's no to paid fetching: do not retry \
+or work around it. An empty page or zero results is a suspected block, not \
+absence. Load the "web" skill (skill://web/SKILL.md) for site tricks, \
+AliExpress costs and output limits."""
+
+# Skills over MCP (SEP-2640): every folder under crawler/skills with a
+# SKILL.md is served as a skill. "web" is the caller guide for this server.
+SKILLS_DIR = Path(__file__).parent / "skills"
+
 # Create the MCP server
 mcp = FastMCP(
     name="Web Crawler & Search",
     request_state_security=_request_state_security(),
-    instructions="""
-    A web crawler and search server that provides:
-
-    1. Web Crawling Tools:
-       - crawl: Crawl one or more URLs and get markdown content
-       - crawl_site: Crawl an entire website with depth/page limits
-
-    2. Web Search Tool:
-       - search: Search the web via the configured providers (SearXNG, You.com),
-         queried in parallel; results are merged and attributed per provider.
-         include_content=true also returns the Markdown of each result page
-
-    Output formats for crawl tools:
-    - markdown: Clean concatenated markdown (default)
-    - json: Full details including metadata and references
-    """,
+    instructions=SERVER_INSTRUCTIONS,
 )
+_skills = SkillsDirectoryProvider(roots=SKILLS_DIR, experimental_skills=True)
+mcp.add_provider(_skills)
+mcp.add_extension(SkillsExtension(providers=[_skills]))
 
 
 class OutputFormat(str, Enum):

@@ -48,6 +48,7 @@ from typing import Awaitable, Callable, Iterable, List, Optional
 
 from .config import PLACEHOLDER_PATTERNS, SETTLE_CAP_MS, TEMPLATE_PATTERN, PageWait
 from .document import CrawledDocument
+from .chromium_profile import seeded_profile, stealth_profile_kwargs
 from .fetch_cache import FetchCache
 from . import firecrawl_tier, page_pacing
 
@@ -557,16 +558,18 @@ async def _tier_stealth(
     from scrapling.fetchers import StealthyFetcher
 
     extra = {"proxy": proxy} if proxy else {}
-    resp = await StealthyFetcher.async_fetch(
-        url,
-        headless=True,
-        solve_cloudflare=True,
-        network_idle=True,
-        block_webrtc=True,
-        timeout=timeout * 1000,
-        page_action=_settle_action(settle_cap_ms(timeout, wait), wait),
-        **extra,
-    )
+    with seeded_profile() as profile:
+        resp = await StealthyFetcher.async_fetch(
+            url,
+            headless=True,
+            solve_cloudflare=True,
+            network_idle=True,
+            block_webrtc=True,
+            timeout=timeout * 1000,
+            page_action=_settle_action(settle_cap_ms(timeout, wait), wait),
+            **extra,
+            **stealth_profile_kwargs(profile),
+        )
     return _doc_from_scrapling(url, resp, "stealth")
 
 

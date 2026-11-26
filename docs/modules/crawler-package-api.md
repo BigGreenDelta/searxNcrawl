@@ -39,6 +39,7 @@ Out of scope: CLI argument parsing, MCP tool definitions, and deep crawl strateg
 | `crawler/__init__.py` | file | Package entrypoint and public API for crawling. |
 | `crawler/auth.py` | file | Storage-state path and JSON-object validation shared by all crawl surfaces. |
 | `crawler/browser_setup.py` | file | Chromium installation and concurrent/repeated-loop protection. |
+| `crawler/chromium_profile.py` | file | Windows only: a fresh Chromium profile per stealth-browser or session-capture launch with a seeded `Local State`, so Chromium skips its blank-password logon test. |
 | `crawler/session_capture.py` | file | Isolated browser login capture and existing-context CDP export. |
 
 ## Key Symbols

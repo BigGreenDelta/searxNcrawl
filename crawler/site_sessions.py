@@ -123,6 +123,14 @@ def site_cookies(state: Any, spec: Site) -> list[dict]:
     return out
 
 
+def site_cookies_or_empty(state: Any, spec: Site) -> list[dict]:
+    """:func:`site_cookies`, or an empty list when there are none."""
+    try:
+        return site_cookies(state, spec)
+    except SessionError:
+        return []
+
+
 def has_login_cookie(cookies: list[dict], spec: Site, now: Optional[float] = None) -> bool:
     """Whether the cookies include one that only a signed-in browser holds."""
     now = time.time() if now is None else now

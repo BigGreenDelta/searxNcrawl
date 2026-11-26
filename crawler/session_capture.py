@@ -11,6 +11,7 @@ from time import monotonic
 from typing import Any, Awaitable, Callable, Literal, Optional
 
 from .browser_setup import ensure_chromium
+from .chromium_profile import seeded_profile
 
 CaptureStatus = Literal["success", "timeout", "abort"]
 
@@ -231,55 +232,66 @@ async def _execute_capture_flow(
     await ensure_chromium()
 
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=headless)
-        context = await browser.new_context()
-        page = await context.new_page()
+        # On Windows the browser gets a seeded profile (see chromium_profile),
+        # which only a persistent context can take; elsewhere ``profile`` is
+        # None and the launch is unchanged.
+        with seeded_profile() as profile:
+            if profile is None:
+                browser = await playwright.chromium.launch(headless=headless)
+                context = await browser.new_context()
+                page = await context.new_page()
+            else:
+                context = await playwright.chromium.launch_persistent_context(
+                    profile, headless=headless
+                )
+                browser = context
+                page = context.pages[0] if context.pages else await context.new_page()
 
-        try:
-            if start_url:
-                await page.goto(start_url)
+            try:
+                if start_url:
+                    await page.goto(start_url)
 
-            while True:
-                if page.is_closed():
-                    return {
-                        "status": "abort",
-                        "message": "Capture aborted: browser page was closed before completion.",
-                        "final_url": None,
-                    }
-
-                current_url = page.url or ""
-                if pattern.search(current_url):
-                    confirmed = True
-                    if confirm_callback is not None:
-                        decision = confirm_callback(current_url)
-                        confirmed = (
-                            await decision
-                            if asyncio.iscoroutine(decision)
-                            else bool(decision)
-                        )
-
-                    if confirmed:
-                        storage_state = await context.storage_state()
+                while True:
+                    if page.is_closed():
                         return {
-                            "status": "success",
-                            "message": "Capture completed and storage_state collected.",
-                            "final_url": current_url,
-                            "storage_state": storage_state,
+                            "status": "abort",
+                            "message": "Capture aborted: browser page was closed before completion.",
+                            "final_url": None,
                         }
 
-                if (monotonic() - started) >= timeout_seconds:
-                    return {
-                        "status": "timeout",
-                        "message": (
-                            "Capture timed out before completion URL was observed "
-                            f"(timeout={timeout_seconds}s)."
-                        ),
-                        "final_url": current_url,
-                    }
+                    current_url = page.url or ""
+                    if pattern.search(current_url):
+                        confirmed = True
+                        if confirm_callback is not None:
+                            decision = confirm_callback(current_url)
+                            confirmed = (
+                                await decision
+                                if asyncio.iscoroutine(decision)
+                                else bool(decision)
+                            )
 
-                await asyncio.sleep(poll_interval)
-        finally:
-            await browser.close()
+                        if confirmed:
+                            storage_state = await context.storage_state()
+                            return {
+                                "status": "success",
+                                "message": "Capture completed and storage_state collected.",
+                                "final_url": current_url,
+                                "storage_state": storage_state,
+                            }
+
+                    if (monotonic() - started) >= timeout_seconds:
+                        return {
+                            "status": "timeout",
+                            "message": (
+                                "Capture timed out before completion URL was observed "
+                                f"(timeout={timeout_seconds}s)."
+                            ),
+                            "final_url": current_url,
+                        }
+
+                    await asyncio.sleep(poll_interval)
+            finally:
+                await browser.close()
 
 
 async def capture_session_async(

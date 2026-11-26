@@ -34,6 +34,7 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 from .document import CrawledDocument
+from .chromium_profile import seeded_profile, stealth_profile_kwargs
 
 LOGGER = logging.getLogger(__name__)
 
@@ -723,16 +724,18 @@ async def _load_pdp(
         await asyncio.gather(*reads, return_exceptions=True)
         return page
 
-    resp = await StealthyFetcher.async_fetch(
-        url,
-        headless=True,
-        network_idle=False,
-        block_webrtc=True,
-        disable_resources=True,
-        timeout=timeout * 1000,
-        page_setup=setup,
-        page_action=action,
-    )
+    with seeded_profile() as profile:
+        resp = await StealthyFetcher.async_fetch(
+            url,
+            headless=True,
+            network_idle=False,
+            block_webrtc=True,
+            disable_resources=True,
+            timeout=timeout * 1000,
+            page_setup=setup,
+            page_action=action,
+            **stealth_profile_kwargs(profile),
+        )
     status = getattr(resp, "status", None)
     region = got.get("region") or {}
     if "pdp" in got:

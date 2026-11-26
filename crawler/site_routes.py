@@ -27,6 +27,7 @@ from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import urlparse
 
 from .document import CrawledDocument
+from .chromium_profile import seeded_profile, stealth_profile_kwargs
 
 LOGGER = logging.getLogger(__name__)
 
@@ -285,16 +286,18 @@ async def _thingiverse_run(url: str, timeout: int, ocr: bool = True) -> CrawledD
         await asyncio.gather(*reads, return_exceptions=True)
         return page
 
-    resp = await StealthyFetcher.async_fetch(
-        url,
-        headless=True,
-        solve_cloudflare=True,
-        network_idle=False,
-        block_webrtc=True,
-        timeout=timeout * 1000,
-        page_setup=setup,
-        page_action=action,
-    )
+    with seeded_profile() as profile:
+        resp = await StealthyFetcher.async_fetch(
+            url,
+            headless=True,
+            solve_cloudflare=True,
+            network_idle=False,
+            block_webrtc=True,
+            timeout=timeout * 1000,
+            page_setup=setup,
+            page_action=action,
+            **stealth_profile_kwargs(profile),
+        )
     status = getattr(resp, "status", None)
     meta: dict[str, Any] = {"fetched_via": "route:thingiverse", "status_code": status}
     thing = got.get("complete")

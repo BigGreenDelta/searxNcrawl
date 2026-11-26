@@ -1,6 +1,7 @@
 """Seeded Chromium profiles that stop the Windows blank-password probe.
 
-Every browser launch path must hand Chromium a user-data dir whose
+Every full-Chromium launch path (Scrapling's StealthyFetcher, session
+capture) must hand Chromium a user-data dir whose
 ``Local State`` already holds the password-check prefs, on Windows only.
 The launch tests force the Windows branch and check the file at the moment
 the (mocked) browser is launched.
@@ -13,15 +14,11 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
-import crawler
 from crawler import aliexpress, chromium_profile, fetch_chain, session_capture
-from crawler import site as site_module
 from crawler import site_routes
-from crawler.auth import ResolvedAuth
 
 
 class _Stop(Exception):
@@ -55,8 +52,6 @@ def no_chromium_install(monkeypatch: pytest.MonkeyPatch) -> None:
     async def noop() -> None:
         return None
 
-    monkeypatch.setattr(crawler, "ensure_chromium", noop)
-    monkeypatch.setattr(site_module, "ensure_chromium", noop)
     monkeypatch.setattr(session_capture, "ensure_chromium", noop)
 
 
@@ -129,197 +124,6 @@ def test_seeded_profile_on_windows_is_fresh_and_removed(windows: None) -> None:
 def test_stealth_profile_kwargs() -> None:
     assert chromium_profile.stealth_profile_kwargs(None) == {}
     assert chromium_profile.stealth_profile_kwargs("/p") == {"user_data_dir": "/p"}
-
-
-def test_crawl4ai_browser_config_uses_persistent_context(tmp_path: Path) -> None:
-    cfg = chromium_profile.crawl4ai_browser_config(str(tmp_path))
-    assert cfg.use_persistent_context is True
-    assert cfg.user_data_dir == str(tmp_path)
-    assert cfg.storage_state is None
-
-
-class _Context:
-    def __init__(self) -> None:
-        self.cookies: list = []
-        self.scripts: list[str] = []
-
-    async def add_cookies(self, cookies):
-        self.cookies.extend(cookies)
-
-    async def add_init_script(self, script):
-        self.scripts.append(script)
-
-
-@pytest.mark.asyncio
-async def test_apply_storage_state_loads_cookies_and_local_storage() -> None:
-    ctx = _Context()
-    state = {
-        "cookies": [{"name": "sid", "value": "1", "domain": "a.test", "path": "/"}],
-        "origins": [
-            {
-                "origin": "https://a.test",
-                "localStorage": [{"name": "token", "value": "t"}],
-            },
-            {"origin": "https://empty.test", "localStorage": []},
-        ],
-    }
-    await chromium_profile.apply_storage_state(ctx, state)
-    assert ctx.cookies == state["cookies"]
-    assert len(ctx.scripts) == 1
-    assert '"https://a.test": {"token": "t"}' in ctx.scripts[0]
-    assert "empty.test" not in ctx.scripts[0]
-
-
-@pytest.mark.asyncio
-async def test_apply_storage_state_empty_adds_nothing() -> None:
-    ctx = _Context()
-    await chromium_profile.apply_storage_state(ctx, {"cookies": [], "origins": []})
-    assert ctx.cookies == [] and ctx.scripts == []
-
-
-@pytest.mark.asyncio
-async def test_storage_state_hook_runs_once_per_context(tmp_path: Path) -> None:
-    state_file = tmp_path / "state.json"
-    state_file.write_text(
-        json.dumps({"cookies": [{"name": "a", "value": "b", "url": "https://a.test"}]}),
-        encoding="utf-8",
-    )
-    hooks: dict[str, Any] = {}
-    fake = SimpleNamespace(
-        crawler_strategy=SimpleNamespace(set_hook=lambda name, fn: hooks.__setitem__(name, fn))
-    )
-    chromium_profile.install_storage_state_hook(fake, str(state_file))
-    ctx = _Context()
-    hook = hooks["on_page_context_created"]
-    page = object()
-    assert await hook(page, context=ctx) is page
-    await hook(page, context=ctx)
-    assert len(ctx.cookies) == 1
-
-
-# -- crawl4ai launch paths ------------------------------------------------
-
-
-def _recording_crawler(seen: list[dict]):
-    class Crawler:
-        def __init__(self, *args, config=None, **kwargs):
-            self.config = config
-            self.hooks: dict[str, Any] = {}
-            self.crawler_strategy = SimpleNamespace(set_hook=self.hooks.__setitem__)
-            seen.append({"args": args, "config": config, "kwargs": kwargs, "crawler": self})
-
-        async def __aenter__(self):
-            # The browser launches here: the profile must be ready now.
-            if self.config is not None and self.config.user_data_dir:
-                _assert_seeded(self.config.user_data_dir)
-                seen[-1]["seeded_at_launch"] = True
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def arun(self, url, config):
-            return [SimpleNamespace(url=url)]
-
-    return Crawler
-
-
-def _fake_builder(result, *, dedup_mode="exact"):
-    return SimpleNamespace(status="success", request_url=result.url, metadata={})
-
-
-@pytest.mark.asyncio
-async def test_crawl_page_seeds_profile_on_windows(
-    windows: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    seen: list[dict] = []
-    monkeypatch.setattr(crawler, "AsyncWebCrawler", _recording_crawler(seen))
-    monkeypatch.setattr(crawler, "build_document_from_result", _fake_builder)
-
-    await crawler.crawl_page_async("https://example.com")
-
-    cfg = seen[0]["config"]
-    assert seen[0].get("seeded_at_launch")
-    assert cfg.use_persistent_context is True
-    assert not Path(cfg.user_data_dir).exists()  # removed after the crawl
-
-
-@pytest.mark.asyncio
-async def test_crawl_page_with_session_on_windows_loads_it_by_hook(
-    windows: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    state_file = tmp_path / "state.json"
-    state_file.write_text('{"cookies": [], "origins": []}', encoding="utf-8")
-    seen: list[dict] = []
-    monkeypatch.setattr(crawler, "AsyncWebCrawler", _recording_crawler(seen))
-    monkeypatch.setattr(crawler, "build_document_from_result", _fake_builder)
-
-    await crawler.crawl_page_async(
-        "https://example.com", auth=ResolvedAuth(storage_state=str(state_file))
-    )
-
-    cfg = seen[0]["config"]
-    assert seen[0].get("seeded_at_launch")
-    # launch_persistent_context takes no storage_state.
-    assert cfg.storage_state is None
-    assert "on_page_context_created" in seen[0]["crawler"].hooks
-
-
-@pytest.mark.asyncio
-async def test_crawl_page_unchanged_off_windows(
-    linux: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    seen: list[dict] = []
-    monkeypatch.setattr(crawler, "AsyncWebCrawler", _recording_crawler(seen))
-    monkeypatch.setattr(crawler, "build_document_from_result", _fake_builder)
-
-    await crawler.crawl_page_async("https://example.com")
-    assert seen[0]["args"] == () and seen[0]["config"] is None and not seen[0]["kwargs"]
-
-    state_file = tmp_path / "state.json"
-    state_file.write_text("{}", encoding="utf-8")
-    await crawler.crawl_page_async(
-        "https://example.com", auth=ResolvedAuth(storage_state=str(state_file))
-    )
-    cfg = seen[1]["config"]
-    assert cfg.storage_state == str(state_file)
-    assert cfg.use_persistent_context is False and cfg.user_data_dir is None
-    assert "on_page_context_created" not in seen[1]["crawler"].hooks
-
-
-@pytest.mark.asyncio
-async def test_crawl_site_seeds_profile_on_windows(
-    windows: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    state_file = tmp_path / "state.json"
-    state_file.write_text("{}", encoding="utf-8")
-    seen: list[dict] = []
-    monkeypatch.setattr(site_module, "AsyncWebCrawler", _recording_crawler(seen))
-    monkeypatch.setattr(site_module, "build_document_from_result", _fake_builder)
-
-    await site_module.crawl_site_async(
-        "https://example.com", auth=ResolvedAuth(storage_state=str(state_file))
-    )
-
-    cfg = seen[0]["config"]
-    assert seen[0].get("seeded_at_launch")
-    assert cfg.use_persistent_context is True and cfg.storage_state is None
-    assert "on_page_context_created" in seen[0]["crawler"].hooks
-    assert not Path(cfg.user_data_dir).exists()
-
-
-@pytest.mark.asyncio
-async def test_crawl_site_unchanged_off_windows(
-    linux: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    seen: list[dict] = []
-    monkeypatch.setattr(site_module, "AsyncWebCrawler", _recording_crawler(seen))
-    monkeypatch.setattr(site_module, "build_document_from_result", _fake_builder)
-
-    await site_module.crawl_site_async("https://example.com")
-
-    cfg = seen[0]["config"]
-    assert cfg.use_persistent_context is False and cfg.user_data_dir is None
 
 
 # -- Scrapling StealthyFetcher launch paths -------------------------------

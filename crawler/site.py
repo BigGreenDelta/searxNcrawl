@@ -17,11 +17,6 @@ from crawl4ai.deep_crawling.dfs_strategy import DFSDeepCrawlStrategy
 from crawl4ai.deep_crawling.filters import DomainFilter
 
 from .browser_setup import ensure_chromium
-from .chromium_profile import (
-    crawl4ai_browser_config,
-    install_storage_state_hook,
-    seeded_profile,
-)
 from .builder import build_document_from_result
 from .page_hooks import PageCallback, install_page_counter, install_reload_hook
 from .auth import AuthInput, resolve_auth
@@ -138,7 +133,6 @@ async def crawl_site_async(
     errors: List[Dict[str, str]] = []
 
     resolved_auth = resolve_auth(auth)
-    session_file = resolved_auth.storage_state if resolved_auth else None
     effective_timeout = timeout if timeout is not None else DEFAULT_SITE_TIMEOUT
     browser_cfg = BrowserConfig(
         use_persistent_context=False,
@@ -146,83 +140,76 @@ async def crawl_site_async(
     )
 
     await ensure_chromium()
-    # On Windows each launch gets a seeded profile (see chromium_profile);
-    # elsewhere ``profile`` is None and the launch is unchanged.
-    with seeded_profile() as profile:
-        if profile is not None:
-            browser_cfg = crawl4ai_browser_config(profile)
-        async with AsyncWebCrawler(config=browser_cfg) as crawler:
-            if profile is not None and session_file:
-                install_storage_state_hook(crawler, session_file)
-            if wants_page_reload(config):
-                install_reload_hook(crawler)
-            if on_page is not None:
-                install_page_counter(crawler, on_page)
+    async with AsyncWebCrawler(config=browser_cfg) as crawler:
+        if wants_page_reload(config):
+            install_reload_hook(crawler)
+        if on_page is not None:
+            install_page_counter(crawler, on_page)
+        try:
+            crawl_result = await asyncio.wait_for(
+                crawler.arun(url=seed_url, config=config),
+                timeout=effective_timeout,
+            )
+        except TimeoutError:
+            elapsed = time.monotonic() - start
+            LOGGER.warning("Timeout crawling %s after %.1fs", seed_url, elapsed)
+            return SiteCrawlResult(
+                documents=[],
+                errors=[
+                    {
+                        "url": seed_url,
+                        "error": f"Timeout after {effective_timeout}s",
+                        "stage": "crawl_timeout",
+                    }
+                ],
+                stats={
+                    "total_pages": 0,
+                    "successful_pages": 0,
+                    "failed_pages": 0,
+                    "error_count": 1,
+                },
+            )
+
+        async for result in _iterate_results(crawl_result):
             try:
-                crawl_result = await asyncio.wait_for(
-                    crawler.arun(url=seed_url, config=config),
-                    timeout=effective_timeout,
+                document = build_document_from_result(result, dedup_mode=dedup_mode)
+            except Exception as exc:
+                LOGGER.warning("Failed to build document for %s: %s", result.url, exc)
+                errors.append(
+                    {
+                        "url": str(result.url),
+                        "error": str(exc),
+                        "stage": "build",
+                    }
                 )
-            except TimeoutError:
-                elapsed = time.monotonic() - start
-                LOGGER.warning("Timeout crawling %s after %.1fs", seed_url, elapsed)
-                return SiteCrawlResult(
-                    documents=[],
-                    errors=[
-                        {
-                            "url": seed_url,
-                            "error": f"Timeout after {effective_timeout}s",
-                            "stage": "crawl_timeout",
-                        }
-                    ],
-                    stats={
-                        "total_pages": 0,
-                        "successful_pages": 0,
-                        "failed_pages": 0,
-                        "error_count": 1,
-                    },
+                continue
+
+            # Deduplicate by request_url
+            if document.request_url in seen_urls:
+                continue
+            seen_urls.add(document.request_url)
+
+            documents.append(document)
+
+            if document.status == "failed":
+                errors.append(
+                    {
+                        "url": document.request_url,
+                        "error": document.error_message or "Unknown",
+                        "stage": "crawl",
+                    }
+                )
+            else:
+                LOGGER.debug(
+                    "Crawled %s (%d/%d)",
+                    document.request_url,
+                    len(documents),
+                    max_pages,
                 )
 
-            async for result in _iterate_results(crawl_result):
-                try:
-                    document = build_document_from_result(result, dedup_mode=dedup_mode)
-                except Exception as exc:
-                    LOGGER.warning("Failed to build document for %s: %s", result.url, exc)
-                    errors.append(
-                        {
-                            "url": str(result.url),
-                            "error": str(exc),
-                            "stage": "build",
-                        }
-                    )
-                    continue
-
-                # Deduplicate by request_url
-                if document.request_url in seen_urls:
-                    continue
-                seen_urls.add(document.request_url)
-
-                documents.append(document)
-
-                if document.status == "failed":
-                    errors.append(
-                        {
-                            "url": document.request_url,
-                            "error": document.error_message or "Unknown",
-                            "stage": "crawl",
-                        }
-                    )
-                else:
-                    LOGGER.debug(
-                        "Crawled %s (%d/%d)",
-                        document.request_url,
-                        len(documents),
-                        max_pages,
-                    )
-
-                if len(documents) >= max_pages:
-                    LOGGER.info("Reached page limit of %d", max_pages)
-                    break
+            if len(documents) >= max_pages:
+                LOGGER.info("Reached page limit of %d", max_pages)
+                break
 
     stats = {
         "total_pages": len(documents),

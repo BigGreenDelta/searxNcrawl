@@ -53,11 +53,6 @@ from .config import (
 from .document import CrawledDocument, Reference
 from .session_capture import CaptureResult, capture_session, capture_session_async
 from .browser_setup import ensure_chromium
-from .chromium_profile import (
-    crawl4ai_browser_config,
-    install_storage_state_hook,
-    seeded_profile,
-)
 from .page_hooks import install_reload_hook
 from .site import SiteCrawlResult, crawl_site_async as _crawl_site_async
 
@@ -133,7 +128,6 @@ async def crawl_page_async(
     run_config = config or build_markdown_run_config()
     effective_timeout = timeout if timeout is not None else DEFAULT_PAGE_TIMEOUT
     resolved_auth = resolve_auth(auth)
-    session_file = resolved_auth.storage_state if resolved_auth else None
     browser_cfg = (
         BrowserConfig(storage_state=resolved_auth.storage_state)
         if resolved_auth and resolved_auth.storage_state
@@ -142,29 +136,27 @@ async def crawl_page_async(
 
     await ensure_chromium()
 
-    # On Windows each launch gets a seeded profile (see chromium_profile);
-    # elsewhere ``profile`` is None and the launch is unchanged.
-    with seeded_profile() as profile:
-        if profile is not None:
-            new_crawler = AsyncWebCrawler(config=crawl4ai_browser_config(profile))
-        elif browser_cfg is not None:
-            new_crawler = AsyncWebCrawler(config=browser_cfg)
-        else:
-            new_crawler = AsyncWebCrawler()
-        try:
-            async with new_crawler as crawler:
-                if profile is not None and session_file:
-                    install_storage_state_hook(crawler, session_file)
+    try:
+        if browser_cfg is None:
+            async with AsyncWebCrawler() as crawler:
                 if wants_page_reload(run_config):
                     install_reload_hook(crawler)
                 container = await asyncio.wait_for(
                     crawler.arun(url=url, config=run_config),
                     timeout=effective_timeout,
                 )
-        except TimeoutError:
-            elapsed = time.monotonic() - start
-            LOGGER.warning("Timeout crawling %s after %.1fs", url, elapsed)
-            raise
+        else:
+            async with AsyncWebCrawler(config=browser_cfg) as crawler:
+                if wants_page_reload(run_config):
+                    install_reload_hook(crawler)
+                container = await asyncio.wait_for(
+                    crawler.arun(url=url, config=run_config),
+                    timeout=effective_timeout,
+                )
+    except TimeoutError:
+        elapsed = time.monotonic() - start
+        LOGGER.warning("Timeout crawling %s after %.1fs", url, elapsed)
+        raise
 
     first_result = await _extract_first_result(container)
 

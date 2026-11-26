@@ -20,6 +20,11 @@ so no cookies or storage carry over between fetches.
 
 The probe exists only on Windows. On other platforms :func:`seeded_profile`
 yields ``None`` and the launch code keeps its usual path.
+
+Only launches of the full Chromium (``chrome.exe``) need this: Scrapling's
+``StealthyFetcher`` and a headed session capture. Crawl4AI launches
+``chrome-headless-shell``, which is built without Chrome's password manager
+and never runs the probe, so its launches are left as they are.
 """
 
 from __future__ import annotations
@@ -114,88 +119,3 @@ def seeded_profile() -> Iterator[Optional[str]]:
 def stealth_profile_kwargs(profile: Optional[str]) -> dict[str, Any]:
     """Keyword arguments for Scrapling's ``StealthyFetcher`` launch."""
     return {"user_data_dir": profile} if profile else {}
-
-
-def crawl4ai_browser_config(profile: str, **kwargs: Any) -> Any:
-    """A Crawl4AI ``BrowserConfig`` that launches Chromium in ``profile``.
-
-    Crawl4AI's default launch lets Playwright pick a temporary profile that
-    cannot be seeded, so a seeded profile needs a persistent context.
-    Playwright's ``launch_persistent_context`` takes no ``storage_state``,
-    so the session is not passed here: :func:`install_storage_state_hook`
-    loads it into the context instead.
-    """
-    from crawl4ai import BrowserConfig
-
-    return BrowserConfig(
-        use_persistent_context=True,
-        user_data_dir=profile,
-        **kwargs,
-    )
-
-
-def _local_storage_script(origins: list[dict[str, Any]]) -> Optional[str]:
-    """An init script that puts each origin's saved localStorage in place."""
-    entries = {
-        o["origin"]: {
-            item["name"]: item["value"]
-            for item in o.get("localStorage") or []
-            if "name" in item and "value" in item
-        }
-        for o in origins
-        if isinstance(o, dict) and o.get("origin")
-    }
-    entries = {origin: items for origin, items in entries.items() if items}
-    if not entries:
-        return None
-    return (
-        "(() => { const saved = "
-        + json.dumps(entries)
-        + "; const items = saved[location.origin]; if (!items) return;"
-        " try { for (const [k, v] of Object.entries(items))"
-        " localStorage.setItem(k, v); } catch (e) {} })();"
-    )
-
-
-def load_storage_state(path: str) -> dict[str, Any]:
-    """Read a Playwright ``storage_state`` JSON file."""
-    with open(path, encoding="utf-8") as fh:
-        state = json.load(fh)
-    return state if isinstance(state, dict) else {}
-
-
-async def apply_storage_state(context: Any, state: dict[str, Any]) -> None:
-    """Load a Playwright ``storage_state`` into an existing browser context.
-
-    Cookies go in through ``add_cookies``. localStorage goes in through an
-    init script that runs before the page's own scripts on each matching
-    origin, which is where Playwright's ``new_context(storage_state=...)``
-    puts it too.
-    """
-    cookies = [c for c in state.get("cookies") or [] if isinstance(c, dict)]
-    if cookies:
-        await context.add_cookies(cookies)
-    script = _local_storage_script(state.get("origins") or [])
-    if script:
-        await context.add_init_script(script)
-
-
-def install_storage_state_hook(crawler: Any, storage_state: str) -> None:
-    """Load ``storage_state`` into a persistent-context crawler's context.
-
-    Runs once per context, before the first page navigates.
-    """
-    state = load_storage_state(storage_state)
-
-    async def on_page_context_created(
-        page: Any, context: Any = None, **kwargs: Any
-    ) -> Any:
-        target = context if context is not None else page.context
-        if not getattr(target, "_searxncrawl_state_applied", False):
-            await apply_storage_state(target, state)
-            target._searxncrawl_state_applied = True
-        return page
-
-    crawler.crawler_strategy.set_hook(
-        "on_page_context_created", on_page_context_created
-    )

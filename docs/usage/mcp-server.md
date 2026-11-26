@@ -127,7 +127,7 @@ it.
 
 - Clients that support the extension list it with `skills/list` and load it
   with `skills/get` and `resources/read`; it needs a 2026-07-28 connection.
-- In Claude Code (a terminal session, v2.1.33x) a server added as `web` shows
+- In Claude Code (a terminal session; tested on v2.1.332) a server added as `web` shows
   it as `web:web` in `/skills`; Claude loads it when a task needs it. `claude
   -p` runs do not load MCP skills.
 - The source is `crawler/skills/web/SKILL.md`. Every folder under

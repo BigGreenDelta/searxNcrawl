@@ -1,10 +1,12 @@
 # MCP Tools
 
-<!-- Updated: 2026-11-22 -->
+<!-- Updated: 2026-11-26 -->
 
 ## `crawl`
 
 Crawl one or more web pages and extract their content.
+
+- With 5 or more URLs, or 2 or more AliExpress item pages, the call runs as an MCP Task for clients that support them, with `<done>/<total> pages done` progress. See [MCP Tasks](mcp-server.md#mcp-tasks).
 
 - `timeout` covers the crawl operation, excluding Chromium installation and browser startup.
 - Unknown `output_format` values fall back to Markdown.
@@ -74,6 +76,7 @@ crawl(urls=["https://www.aliexpress.com/item/1005012556272268.html"], images=Tru
 Crawl an entire website starting from a seed URL using DFS strategy.
 
 - Results are collected before the response; this tool does not stream pages.
+- Runs as an MCP Task for clients that support them: the client gets a task id at once, progress reports `<n> pages crawled (limit <max_pages>)`, and cancelling the task stops the crawl. See [MCP Tasks](mcp-server.md#mcp-tasks).
 - An ordinary site timeout returns no documents and `stats.error_count=1`. The Python API also exposes an `errors` list; the MCP JSON response does not expose that list.
 
 ### Parameters

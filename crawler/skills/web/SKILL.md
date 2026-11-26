@@ -99,6 +99,14 @@ currency and stock, the specifications and the full description.
   challenge rate and when the last challenge was. Check it before a large
   batch or after a challenge.
 
+## Long calls run in the background
+
+With a client that supports MCP Tasks (Claude Code terminal sessions do),
+`crawl_site`, and `crawl` with 5 or more URLs or 2 or more AliExpress items,
+return a task at once and the result arrives later. Keep working on something
+else meanwhile and use the result when it comes. Progress shows pages done.
+Stopping the task stops the crawl. Smaller calls answer at once as usual.
+
 ## Keep results small
 
 - `remove_links=true` drops links and inline images from the Markdown.

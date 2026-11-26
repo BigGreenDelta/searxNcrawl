@@ -1,6 +1,7 @@
 ---
 name: login
-description: Log the user in to a site (AliExpress) for this web router, as a short questionnaire. The user logs in themselves in a browser window; the session goes to 1Password, where the router reads it at fetch time, never to disk and never through the model. Use when the user wants the router to see their own prices or logged-in pages, says "log in to AliExpress", "refresh my AliExpress session", "the session expired", or a crawl says the session is missing or expired.
+description: Log the user in to a site (AliExpress) for this web router, as a short questionnaire. The user logs in themselves in a browser window; the session goes to 1Password, where the router reads it at fetch time, never to disk and never through the model. Use when the user wants the router to see their own prices or logged-in pages, says "log in to AliExpress", "refresh my AliExpress session", "the session expired", or a crawl says the session is missing or expired. Takes an optional site name, as in /web:login aliexpress.
+argument-hint: "[site]"
 ---
 
 # Site login questionnaire
@@ -44,6 +45,16 @@ the user that the 1Password CLI must be signed in first.
   --vault <vault>`. Both print names only (JSON).
 - Call the router's `site_sessions` tool. Its `op_ref` per site is where the
   router reads the session today (`null`: nowhere yet).
+
+## Site argument
+
+The command may come with a site name, as in `/web:login aliexpress`.
+
+- A known site (one of the `--site` choices, any letter case): skip
+  question 1 and use that site.
+- An unknown or misspelled name: say so in one line, such as "No site
+  `aliexprss`; known: aliexpress.", then ask question 1 as usual.
+- No argument: ask question 1.
 
 ## Questions
 

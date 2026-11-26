@@ -29,7 +29,12 @@ facts. The output is non-secret only: the `op://` reference, the cookie count
 and the login cookie's expiry date.
 
 In Claude Code the `login` skill (`skill://login/SKILL.md`) runs the same
-flow as a short questionnaire.
+flow as a short questionnaire: type `/web:login` when the server is added as
+`web`. It asks for the site, vault, item, where the router's `SITE_SESSIONS`
+pointer goes, and a final confirm, one question at a time.
+`/web:login aliexpress` names the site up front and skips the site
+question; an unknown site name is reported in one line and the site
+question is asked as usual.
 
 ## Let the server read it
 

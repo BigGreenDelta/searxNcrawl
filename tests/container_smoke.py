@@ -71,6 +71,10 @@ async def check(url):
             **({"PLAYWRIGHT_BROWSERS_PATH": os.environ["PLAYWRIGHT_BROWSERS_PATH"]}
                if "PLAYWRIGHT_BROWSERS_PATH" in os.environ else {}),
             "PLAYWRIGHT_AUTO_INSTALL": "false",
+            # The fetch router would take this page from the http tier, before
+            # any script runs; the check is that Chromium renders it. No cache.
+            "FETCH_TIERS": "browser",
+            "FETCH_CACHE_TTL": "0",
         },
         keep_alive=False,
         log_file=Path(os.devnull),
@@ -80,7 +84,9 @@ async def check(url):
             ("Searxncrawl_Crawl", "Searxncrawl_CrawlSite", "Searxncrawl_Search")
             if ARCADE else ("crawl", "crawl_site", "search")
         )
-        assert {tool.name for tool in await client.list_tools()} == {crawl, site, search}
+        # The native server has more tools (Reddit, AliExpress log); these three
+        # are the ones both images must serve.
+        assert {crawl, site, search} <= {tool.name for tool in await client.list_tools()}
         for tool, arguments in [
             *[(crawl, {"urls": [url]}) for _ in range(16)],
             (crawl, {"urls": [url + "?one", url + "?two"], "concurrency": 2}),

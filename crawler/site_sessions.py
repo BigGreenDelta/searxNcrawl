@@ -46,9 +46,6 @@ class Site:
     # Registrable domains. A cookie belongs to the site when its domain is one
     # of these or a subdomain of one.
     domains: tuple[str, ...]
-    # Hosts of the login pages; the browser has left the login when the page
-    # is on another host.
-    login_hosts: tuple[str, ...] = ()
     # Cookie names that only a signed-in browser holds, with an optional text
     # the value must contain. Unverified per site until a real login shows it.
     login_cookies: tuple[tuple[str, str], ...] = ()
@@ -60,7 +57,6 @@ SITES: dict[str, Site] = {
         title="AliExpress",
         login_url="https://login.aliexpress.com/",
         domains=("aliexpress.com", "aliexpress.us"),
-        login_hosts=("login.aliexpress.com", "login.aliexpress.us"),
         # Havana (Alibaba's login) sets _hvn_login after sign-in, and
         # xman_us_t carries x_lid (the login id) only for a signed-in buyer.
         login_cookies=(("_hvn_login", ""), ("xman_us_t", "x_lid=")),

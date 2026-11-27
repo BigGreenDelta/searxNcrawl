@@ -86,7 +86,12 @@ def test_reference_uses_ids_for_names_op_cannot_parse(monkeypatch):
 
 
 class _LoginPage(BaseHTTPRequestHandler):
-    """/login sets login cookies after a moment and moves to another host."""
+    """/login sets login cookies after a moment and moves to another host.
+
+    /stay sets them and stays on the page. /away visits another origin first
+    and comes back, then waits: a poll that read local storage would open a
+    tab for that origin on every round.
+    """
 
     def do_GET(self):
         port = self.server.server_address[1]
@@ -99,6 +104,23 @@ class _LoginPage(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
+        if self.path == "/stay":
+            self.wfile.write(b"<script>setTimeout(() => fetch('/done'), 300)</script>")
+            return
+        if self.path == "/away":
+            self.wfile.write(
+                (
+                    "<script>if (!sessionStorage.back) { sessionStorage.back = 1;"
+                    f" location = 'http://localhost:{port}/back' }}"
+                    " else setTimeout(() => fetch('/done'), 1500)</script>"
+                ).encode()
+            )
+            return
+        if self.path == "/back":
+            self.wfile.write(
+                f"<script>location = 'http://127.0.0.1:{port}/away'</script>".encode()
+            )
+            return
         if self.path == "/login":
             self.wfile.write(
                 (
@@ -123,7 +145,6 @@ def login_site():
         title="Selftest",
         login_url=f"http://127.0.0.1:{port}/login",
         domains=("127.0.0.1",),
-        login_hosts=("127.0.0.1",),
         login_cookies=(("_hvn_login", ""),),
     )
     server.shutdown()
@@ -135,6 +156,35 @@ def test_capture_waits_for_the_login_cookie(login_site):
     )
     assert how == "login seen"
     assert sorted(c["name"] for c in cookies) == ["_hvn_login", "other"]
+
+
+def test_capture_does_not_need_to_leave_the_login_page(login_site):
+    stay = login_site.login_url.replace("/login", "/stay")
+    cookies, how = asyncio.run(
+        site_login.capture(
+            login_site, login_url=stay, headless=True, timeout_s=30, poll_s=0.2, settle_s=0.2
+        )
+    )
+    assert how == "login seen"
+    assert "_hvn_login" in {c["name"] for c in cookies}
+
+
+def test_capture_polls_cookies_only(login_site, monkeypatch):
+    """storage_state() opens a tab per visited origin: never call it while waiting."""
+    from playwright.async_api import BrowserContext
+
+    async def no_storage_state(self, *args, **kwargs):
+        raise AssertionError("storage_state() opens tabs in the visible window")
+
+    monkeypatch.setattr(BrowserContext, "storage_state", no_storage_state)
+    away = login_site.login_url.replace("/login", "/away")
+    cookies, how = asyncio.run(
+        site_login.capture(
+            login_site, login_url=away, headless=True, timeout_s=30, poll_s=0.2, settle_s=0.2
+        )
+    )
+    assert how == "login seen"
+    assert "_hvn_login" in {c["name"] for c in cookies}
 
 
 def test_capture_gives_up_without_a_login(login_site):

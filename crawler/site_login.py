@@ -33,7 +33,6 @@ import subprocess
 import sys
 import time
 from typing import Optional
-from urllib.parse import urlparse
 
 from . import site_sessions
 from .site_sessions import Site, SessionError
@@ -144,12 +143,15 @@ def _vault_id(name: str) -> str:
 # --- the login window --------------------------------------------------------
 
 
-def _left_login(url: str, spec: Site, login_url: str) -> bool:
-    host = (urlparse(url).hostname or "").lower()
-    if not host or url.startswith("about:"):
-        return False
-    hosts = set(spec.login_hosts) | {(urlparse(login_url).hostname or "").lower()}
-    return host not in hosts
+async def _site_cookies(context, spec: Site) -> list[dict]:
+    """The site's cookies in the browser now.
+
+    Reads cookies only. ``context.storage_state()`` would also collect local
+    storage, and for every origin the browser has visited without a tab open
+    on it now, Playwright opens a tab to read it: in a visible window that
+    is a tab that opens and closes on every poll.
+    """
+    return site_sessions.site_cookies_or_empty({"cookies": await context.cookies()}, spec)
 
 
 async def capture(
@@ -164,9 +166,12 @@ async def capture(
 ) -> tuple[list[dict], str]:
     """Open the login page and wait for the person to log in.
 
-    Returns the site's cookies (in memory) and how the login was seen.
-    Raises :class:`SessionError` on timeout or when the window closes before
-    a login was seen.
+    It ends in one of two ways only: the browser holds one of the site's
+    login cookies (the person is logged in), or the person closes the window.
+    Where the page goes in between does not matter; sites move their login
+    page to other hosts. Returns the site's cookies (in memory) and how the
+    login was seen. Raises :class:`SessionError` on timeout or when the
+    window closes before a login was seen.
     """
     from playwright.async_api import async_playwright
 
@@ -180,30 +185,21 @@ async def capture(
             page = await context.new_page()
             await page.goto(login_url, wait_until="domcontentloaded")
             last: list[dict] = []
-            last_url = login_url
             deadline = time.monotonic() + timeout_s
             while time.monotonic() < deadline:
                 try:
-                    state = await context.storage_state()
-                    last_url = page.url
+                    last = await _site_cookies(context, spec)
                 except Exception:  # noqa: BLE001 - window closed
                     break
-                try:
-                    last = site_sessions.site_cookies(state, spec)
-                except SessionError:
-                    last = []
-                if last and site_sessions.has_login_cookie(last, spec) and _left_login(
-                    last_url, spec, login_url
-                ):
+                if site_sessions.has_login_cookie(last, spec):
                     await asyncio.sleep(settle_s)
                     try:
-                        last = site_sessions.site_cookies(
-                            await context.storage_state(), spec
-                        )
+                        last = await _site_cookies(context, spec) or last
                     except Exception:  # noqa: BLE001 - keep the earlier snapshot
                         pass
                     return last, "login seen"
-                if page.is_closed():
+                # The person closed the window (every tab of it).
+                if not [p for p in context.pages if not p.is_closed()]:
                     break
                 await asyncio.sleep(poll_s)
             else:
@@ -215,7 +211,7 @@ async def capture(
                 await browser.close()
             except Exception:  # noqa: BLE001 - already gone
                 pass
-    if last and accept_unconfirmed and _left_login(last_url, spec, login_url):
+    if last and accept_unconfirmed:
         return last, "window closed, login not confirmed"
     names = ", ".join(n for n, _ in spec.login_cookies) or "none defined"
     raise SessionError(

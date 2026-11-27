@@ -101,6 +101,20 @@ class _LoginPage(BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", "other=1; Path=/")
             self.end_headers()
             return
+        if self.path == "/home2":
+            # The main domain's home page: the site carries the login over.
+            self.send_response(200)
+            self.send_header("Set-Cookie", "_hvn_login=13; Max-Age=3600; Path=/")
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"home")
+            return
+        if self.path == "/sister":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<script>setTimeout(() => fetch('/done'), 300)</script>")
+            return
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
@@ -185,6 +199,35 @@ def test_capture_polls_cookies_only(login_site, monkeypatch):
     )
     assert how == "login seen"
     assert "_hvn_login" in {c["name"] for c in cookies}
+
+
+def test_sister_domain_login_is_carried_to_the_main_domain(login_site):
+    """A login that lands on a sister domain first is not enough on its own."""
+    port = login_site.login_url.split(":")[2].split("/")[0]
+    site = Site(
+        **{
+            **login_site.__dict__,
+            "domains": ("127.0.0.1", "localhost"),
+            "main_domain": "127.0.0.1",
+            "home_url": f"http://127.0.0.1:{port}/home2",
+        }
+    )
+    cookies, how = asyncio.run(
+        site_login.capture(
+            site,
+            login_url=f"http://localhost:{port}/sister",
+            headless=True,
+            timeout_s=30,
+            poll_s=0.2,
+            settle_s=0.2,
+            sync_s=0.5,
+        )
+    )
+    assert how == "login seen"
+    assert {(c["name"], c["domain"]) for c in cookies} >= {
+        ("_hvn_login", "localhost"),
+        ("_hvn_login", "127.0.0.1"),
+    }
 
 
 def test_capture_gives_up_without_a_login(login_site):

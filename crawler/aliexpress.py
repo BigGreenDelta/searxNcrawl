@@ -455,9 +455,10 @@ def session_line(state: Optional[str], why: str = "") -> str:
         "deal) prices, not your regular price"
     )
     if state == EXPIRED:
+        reason = f" ({why})" if why else ""
         return (
             "- **Prices:** your AliExpress session has expired or was not "
-            f"accepted, so {fallback}. Log in again (`login` skill)."
+            f"accepted{reason}, so {fallback}. Log in again (`login` skill)."
         )
     if state == SESSION_ERROR:
         reason = f" ({why})" if why else ""
@@ -967,6 +968,8 @@ def login_keys(result: dict, limit: int = 20) -> list[str]:
             return
         if isinstance(value, dict):
             for key, inner in value.items():
+                if str(key) == "i18n":  # UI text labels, never a login marker
+                    continue
                 here = f"{path}.{key}" if path else str(key)
                 if _LOGIN_KEY.search(str(key)):
                     found.append(here)
@@ -1007,7 +1010,13 @@ def _session() -> tuple[Any, str, str]:
     if session is None:
         has_ref = "aliexpress" in site_sessions.configured_refs()
         return None, (SESSION_ERROR if has_ref else NO_SESSION), (why or "")
-    if not site_sessions.has_login_cookie(session.cookies, site_sessions.SITES["aliexpress"]):
+    spec = site_sessions.SITES["aliexpress"]
+    if not site_sessions.has_login_cookie(session.cookies, spec):
+        if site_sessions.has_login_cookie(session.cookies, spec, any_domain=True):
+            return None, EXPIRED, (
+                f"the saved login is not on {spec.login_domain}: the login "
+                "window closed before AliExpress carried it over"
+            )
         return None, EXPIRED, ""
     return session, LOGGED_IN, ""
 

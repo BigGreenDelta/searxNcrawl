@@ -199,3 +199,15 @@ def test_status_holds_no_secret(monkeypatch):
         }
     ]
     assert FAKE_TOKEN not in json.dumps(rows)
+
+
+def test_login_counts_only_on_the_main_domain():
+    future = time.time() + 3600
+    us = _c("xman_us_t", ".aliexpress.us", "x_lid=uk1&sign=0", future)
+    com = _c("xman_us_t", ".aliexpress.com", "x_lid=uk1&sign=0", future)
+    assert not site_sessions.has_login_cookie([us], ALI)
+    assert site_sessions.has_login_cookie([us], ALI, any_domain=True)
+    assert site_sessions.has_login_cookie([com], ALI)
+    assert site_sessions.login_expiry([us], ALI) is None
+    assert site_sessions.login_expiry([us, com], ALI) == future
+    assert ALI.login_domain == "aliexpress.com"

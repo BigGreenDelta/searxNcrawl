@@ -49,6 +49,18 @@ class Site:
     # Cookie names that only a signed-in browser holds, with an optional text
     # the value must contain. Unverified per site until a real login shows it.
     login_cookies: tuple[tuple[str, str], ...] = ()
+    # The domain the router loads pages from (default: the first of
+    # ``domains``). A login counts only when its cookie is on this domain: a
+    # site can sign in on a sister domain first (AliExpress sets the login on
+    # .aliexpress.us before .aliexpress.com), and the router never sends those.
+    main_domain: str = ""
+    # A page on the main domain. Opening it after a login on a sister domain
+    # lets the site carry the login over.
+    home_url: str = ""
+
+    @property
+    def login_domain(self) -> str:
+        return self.main_domain or self.domains[0]
 
 
 SITES: dict[str, Site] = {
@@ -57,6 +69,8 @@ SITES: dict[str, Site] = {
         title="AliExpress",
         login_url="https://login.aliexpress.com/",
         domains=("aliexpress.com", "aliexpress.us"),
+        main_domain="aliexpress.com",
+        home_url="https://www.aliexpress.com/",
         # Havana (Alibaba's login) sets _hvn_login after sign-in, and
         # xman_us_t carries x_lid (the login id) only for a signed-in buyer.
         login_cookies=(("_hvn_login", ""), ("xman_us_t", "x_lid=")),
@@ -128,27 +142,49 @@ def site_cookies_or_empty(state: Any, spec: Site) -> list[dict]:
         return []
 
 
-def has_login_cookie(cookies: list[dict], spec: Site, now: Optional[float] = None) -> bool:
-    """Whether the cookies include one that only a signed-in browser holds."""
-    now = time.time() if now is None else now
+def _on_domain(cookie: dict, domain: str) -> bool:
+    host = str(cookie.get("domain", "")).strip().lstrip(".").lower()
+    return host == domain or host.endswith("." + domain)
+
+
+def _login_cookies(cookies: list[dict], spec: Site, domain: Optional[str]) -> list[dict]:
+    out = []
     for cookie in cookies:
+        if domain and not _on_domain(cookie, domain):
+            continue
         for name, must in spec.login_cookies:
-            if cookie.get("name") != name or must not in str(cookie.get("value", "")):
-                continue
-            expires = cookie.get("expires", -1)
-            if expires is None or expires < 0 or expires > now:
-                return True
+            if cookie.get("name") == name and must in str(cookie.get("value", "")):
+                out.append(cookie)
+                break
+    return out
+
+
+def has_login_cookie(
+    cookies: list[dict],
+    spec: Site,
+    now: Optional[float] = None,
+    *,
+    any_domain: bool = False,
+) -> bool:
+    """Whether the cookies include one that only a signed-in browser holds.
+
+    Only cookies on the site's main domain count, unless ``any_domain``.
+    """
+    now = time.time() if now is None else now
+    domain = None if any_domain else spec.login_domain
+    for cookie in _login_cookies(cookies, spec, domain):
+        expires = cookie.get("expires", -1)
+        if expires is None or expires < 0 or expires > now:
+            return True
     return False
 
 
 def login_expiry(cookies: list[dict], spec: Site) -> Optional[float]:
-    """When the login cookies run out (Unix seconds); None for browser-session cookies."""
-    names = {n for n, _ in spec.login_cookies}
+    """When the main domain's login cookies run out (Unix seconds); None for browser-session cookies."""
     times = [
         c["expires"]
-        for c in cookies
-        if c.get("name") in names and isinstance(c.get("expires"), (int, float))
-        and c["expires"] > 0
+        for c in _login_cookies(cookies, spec, spec.login_domain)
+        if isinstance(c.get("expires"), (int, float)) and c["expires"] > 0
     ]
     return max(times) if times else None
 

@@ -65,6 +65,14 @@ Every AliExpress sheet starts with a line that says whose prices it shows:
   logged-out sheet, with the reason, and its sale prices are labelled
   new-shopper prices.
 
+A login counts only when its cookie is on the site's main domain
+(`aliexpress.com`), the one the route loads pages from. AliExpress signs in
+on `aliexpress.us` first and carries the login over to `aliexpress.com`
+afterwards, so `site-login` keeps the window open until the login reaches
+the main domain; after 5 seconds with a login on the sister domain only, it
+opens the home page once to let the site carry it over. A saved session with
+no login on the main domain is shown as not accepted, with that reason.
+
 A session counts as expired when its login cookie has run out, or when the
 page load ends without it. The route adds its UK / GBP region cookies only
 where the session has none of its own. A logged-in load records two

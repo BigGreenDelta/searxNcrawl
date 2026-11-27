@@ -162,12 +162,17 @@ async def capture(
     timeout_s: float = 600,
     poll_s: float = 1.0,
     settle_s: float = 2.0,
+    sync_s: float = 5.0,
     accept_unconfirmed: bool = False,
 ) -> tuple[list[dict], str]:
     """Open the login page and wait for the person to log in.
 
     It ends in one of two ways only: the browser holds one of the site's
-    login cookies (the person is logged in), or the person closes the window.
+    login cookies on its main domain (the person is logged in), or the person
+    closes the window. A login seen only on a sister domain (AliExpress signs
+    in on .aliexpress.us first) is not enough: after ``sync_s`` seconds the
+    window opens the site's home page once, so the site carries the login
+    over to the main domain.
     Where the page goes in between does not matter; sites move their login
     page to other hosts. Returns the site's cookies (in memory) and how the
     login was seen. Raises :class:`SessionError` on timeout or when the
@@ -185,12 +190,30 @@ async def capture(
             page = await context.new_page()
             await page.goto(login_url, wait_until="domcontentloaded")
             last: list[dict] = []
+            sister_login_at: Optional[float] = None
+            went_home = False
             deadline = time.monotonic() + timeout_s
             while time.monotonic() < deadline:
                 try:
                     last = await _site_cookies(context, spec)
                 except Exception:  # noqa: BLE001 - window closed
                     break
+                if (
+                    not went_home
+                    and spec.home_url
+                    and site_sessions.has_login_cookie(last, spec, any_domain=True)
+                    and not site_sessions.has_login_cookie(last, spec)
+                ):
+                    sister_login_at = sister_login_at or time.monotonic()
+                    open_pages = [p for p in context.pages if not p.is_closed()]
+                    if open_pages and time.monotonic() - sister_login_at >= sync_s:
+                        went_home = True
+                        try:
+                            await open_pages[-1].goto(
+                                spec.home_url, wait_until="domcontentloaded"
+                            )
+                        except Exception:  # noqa: BLE001 - keep waiting
+                            pass
                 if site_sessions.has_login_cookie(last, spec):
                     await asyncio.sleep(settle_s)
                     try:

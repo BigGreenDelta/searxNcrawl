@@ -391,7 +391,7 @@ def item_site(monkeypatch):
     monkeypatch.setitem(
         site_sessions.SITES,
         "aliexpress",
-        site_sessions.Site(**{**spec.__dict__, "domains": ("127.0.0.1",)}),
+        site_sessions.Site(**{**spec.__dict__, "domains": ("127.0.0.1",), "main_domain": "127.0.0.1"}),
     )
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()
@@ -439,3 +439,18 @@ async def test_logged_in_load_errors_name_only_the_type(monkeypatch):
         await ae._load_pdp_session("https://www.aliexpress.com/item/1.html", 5, [_cookie("a")])
     assert str(err.value) == "logged-in page load failed (RuntimeError)"
     assert FAKE not in str(err.value)
+
+
+async def test_login_only_on_the_sister_domain_is_not_used(scripted):
+    us = dict(_cookie("xman_us_t", "x_lid=uk1&sign=0"), domain=".aliexpress.us")
+    scripted["session"] = site_sessions.Session("aliexpress", [us, _cookie("other")])
+    doc = await ae.run(ITEM_URL, 45)
+    assert doc.metadata["session"] == ae.EXPIRED
+    assert scripted["session_loads"] == [] and scripted["plain_loads"] == 1
+    assert "the saved login is not on aliexpress.com" in doc.markdown
+    _no_secret(doc)
+
+
+def test_login_keys_skip_ui_text():
+    result = {"GLOBAL_DATA": {"globalData": {"i18n": {"BUYER_ABLE": "x"}, "isLogin": True}}}
+    assert ae.login_keys(result) == ["GLOBAL_DATA.globalData.isLogin"]
